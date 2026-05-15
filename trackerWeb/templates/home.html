@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ tracker_name }} — Status</title>
+  <style>
+    :root {
+      --ink:        #1a1a18;
+      --ink-muted:  #5f5e5a;
+      --ink-faint:  #888780;
+      --surface:    #f8f6f1;
+      --card:       #ffffff;
+      --border:     rgba(26,26,24,.13);
+      --accent:     #0c447c;
+      --accent-bg:  #e6f1fb;
+      --green:      #166534;
+      --green-bg:   #dcfce7;
+      --green-bdr:  #86efac;
+      --radius:     10px;
+      --mono:       'Courier New', monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink:       #e8e6df;
+        --ink-muted: #b4b2a9;
+        --ink-faint: #888780;
+        --surface:   #1c1c1a;
+        --card:      #252522;
+        --border:    rgba(232,230,223,.12);
+        --accent:    #85b7eb;
+        --accent-bg: #042c53;
+        --green:     #86efac;
+        --green-bg:  #052e16;
+        --green-bdr: #166534;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      background: var(--surface); color: var(--ink);
+      min-height: 100vh; padding: 2rem 1rem;
+    }
+
+    /* ── Top bar ── */
+    .topbar {
+      max-width: 640px; margin: 0 auto 2rem;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .monogram {
+      width: 42px; height: 42px; border-radius: 9px;
+      background: var(--ink); color: var(--surface);
+      font-family: var(--mono); font-size: 14px; letter-spacing: -0.5px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; user-select: none;
+    }
+    .topbar-title { font-size: 16px; letter-spacing: 0.02em; }
+    .topbar-sub { font-size: 11px; color: var(--ink-faint); font-family: var(--mono); margin-top: 2px; }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .user-chip {
+      font-family: var(--mono); color: var(--ink-muted); font-size: 12px;
+    }
+    .btn-signout {
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em;
+      padding: 5px 12px; border-radius: 6px;
+      background: none; border: 0.5px solid var(--border);
+      color: var(--ink-muted); cursor: pointer; text-decoration: none;
+      transition: background .15s, color .15s;
+    }
+    .btn-signout:hover { background: var(--card); color: var(--ink); }
+
+    /* ── Cards ── */
+    .stack { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .card {
+      background: var(--card); border: 0.5px solid var(--border);
+      border-radius: var(--radius); padding: 1.5rem;
+    }
+    .card-title {
+      font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--ink-faint); font-family: var(--mono);
+      margin-bottom: 1rem;
+    }
+
+    /* ── Status badge ── */
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: var(--green-bg); color: var(--green);
+      border: 0.5px solid var(--green-bdr);
+      border-radius: 8px; padding: 12px 18px;
+      font-size: 15px; font-weight: normal; letter-spacing: 0.01em;
+      width: 100%;
+    }
+    .status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--green); flex-shrink: 0;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .4; }
+    }
+
+    /* ── Info table ── */
+    .info-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .info-table td {
+      padding: 7px 0;
+      border-bottom: 0.5px solid var(--border);
+      vertical-align: top;
+    }
+    .info-table tr:last-child td { border-bottom: none; }
+    .info-table td:first-child {
+      width: 38%; color: var(--ink-faint);
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+      text-transform: uppercase; padding-right: 12px;
+    }
+    .info-table td:last-child { font-family: var(--mono); font-size: 12px; }
+
+    /* ── Footer ── */
+    .footer {
+      max-width: 640px; margin: 2rem auto 0;
+      font-size: 11px; color: var(--ink-faint); font-family: var(--mono);
+      letter-spacing: 0.04em; text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="monogram">{{ tracker_name[:3] | upper }}</div>
+    <div>
+      <div class="topbar-title">{{ tracker_name }}</div>
+      <div class="topbar-sub">MultiTrack Platform &mdash; v{{ version }}</div>
+    </div>
+    <div class="topbar-right">
+      <span class="user-chip">{{ current_user }}{% if current_role %} &middot; {{ current_role }}{% endif %}</span>
+      <a class="btn-signout" href="{{ url_for('logout') }}">Sign out</a>
+    </div>
+  </div>
+
+  <div class="stack">
+
+    <!-- Platform status -->
+    <div class="card">
+      <div class="card-title">Platform Status</div>
+      <div class="status-badge">
+        <span class="status-dot"></span>
+        MultiTrack Web Platform — Online
+      </div>
+    </div>
+
+    <!-- Tracker info -->
+    <div class="card">
+      <div class="card-title">Tracker</div>
+      <table class="info-table">
+        <tr>
+          <td>Name</td>
+          <td>{{ tracker_name }}</td>
+        </tr>
+        <tr>
+          <td>Version</td>
+          <td>{{ version }}</td>
+        </tr>
+        <tr>
+          <td>Mount point</td>
+          <td>{{ request.script_name or "/" }}</td>
+        </tr>
+        <tr>
+          <td>User DB</td>
+          <td>{{ db_path }}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Session info -->
+    <div class="card">
+      <div class="card-title">Session</div>
+      <table class="info-table">
+        <tr>
+          <td>Signed in as</td>
+          <td>{{ current_user }}</td>
+        </tr>
+        <tr>
+          <td>Role</td>
+          <td>{{ current_role }}</td>
+        </tr>
+        <tr>
+          <td>Full name</td>
+          <td>{{ session.get('full_name', '—') }}</td>
+        </tr>
+        <tr>
+          <td>Persistent</td>
+          <td>{{ 'Yes (remember me)' if session.permanent else 'No (browser session)' }}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Runtime info -->
+    <div class="card">
+      <div class="card-title">Runtime</div>
+      <table class="info-table">
+        <tr>
+          <td>Python</td>
+          <td>{{ python_version }}</td>
+        </tr>
+        <tr>
+          <td>Flask</td>
+          <td>{{ flask_version }}</td>
+        </tr>
+        <tr>
+          <td>SCRIPT_NAME</td>
+          <td>{{ request.script_name or '(none — standalone)' }}</td>
+        </tr>
+        <tr>
+          <td>Host</td>
+          <td>{{ request.host }}</td>
+        </tr>
+      </table>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    MultiTrack Web Platform &mdash; TrackerWeb test application
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,19 @@
+# User databases — encrypted but still sensitive; never commit
+**/Accts/*.gpg
+**/Accts/*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
