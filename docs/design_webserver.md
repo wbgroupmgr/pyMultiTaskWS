@@ -105,7 +105,8 @@ any other. There is no cross-Tracker single sign-on.
 ```
 pyMultiTaskWS/
 │
-├── multitrack_wsgi.py          ← Dispatcher (runnable locally; copy to ~/  on PA)
+├── setupWebServerCmd.py        ← One-shot interactive PA setup (run this first)
+├── multitrack_wsgi.py          ← Dispatcher (PA imports this; runnable locally too)
 │
 ├── multitrack/                 ← Platform core package
 │   ├── __init__.py
@@ -281,78 +282,46 @@ runs — delete `trackerWeb/Accts/pw.json.gpg` to reset to a clean state.
 
 ---
 
-### 4.3 Step 1 — Bash Console: Clone Repos
+### 4.3 Step 1 — Bash Console: Clone the Platform Repo
 
 Open a **Bash console** (Dashboard → Consoles → Bash).
 
 ```bash
-# Clone the platform core (provides multitrack/ and trackerWeb/)
 cd ~
 git clone https://github.com/wbgroupmgr/pyMultiTaskWS.git
-
-# Clone each Tracker repo into its TrackerID directory
-mkdir -p ~/llc
-cd ~/llc
-git clone https://github.com/wbgroupmgr/LLC-WB-Group.git
 ```
 
 ---
 
-### 4.4 Step 2 — Run TrackerWeb Setup (smoke-test first)
-
-Before setting up production Trackers, verify the platform itself works:
+### 4.4 Step 2 — Run the Platform Setup Script
 
 ```bash
 cd ~/pyMultiTaskWS
-pip install --user flask werkzeug
-export MULTITRACK_GPG_PASSPHRASE="<choose-a-passphrase>"
-python trackerWeb/wsgi.py &   # runs in background; Ctrl-C to stop
+python3.10 setupWebServerCmd.py
 ```
 
-Visit `https://<pa-user>.pythonanywhere.com/web/login` after reloading
-the PA web app (Step 4). If TrackerWeb loads, the platform is functioning.
-
----
-
-### 4.5 Step 3 — Run Tracker Setup Script
-
-For each production Tracker (e.g. the LLC Tracker):
-
-```bash
-pip install --user flask pandas numpy pypdf werkzeug deepdiff
-
-python3.10 ~/pyMultiTaskWS/setup/setupWebServerCmd.py \
-    --tracker-name "LLC Editor" \
-    --tracker-id   llc \
-    --db           ~/llc/LLC-WB-Group/pages/AccountingData/Accts/pw.json.gpg \
-    --notebooks    ~/llc/LLC-WB-Group/pages/AccountingData/Notebooks \
-    --seed-user    llcgroupmgr \
-    --seed-pass    "llcManager0!" \
-    --seed-role    llcManager
-```
-
-The script:
+The script runs interactively:
 
 | Step | Action |
 |------|--------|
-| 1 | Prompts for `LLC_GPG_PASSPHRASE` (min 12 chars, confirmed) |
-| 2 | Installs pip dependencies |
-| 3 | Seeds `pw.json.gpg` with the seed user |
-| 4 | Generates `LLC_SECRET_KEY`; stores in `pw.json.gpg` under `_wsadmin.notes` |
-| 5 | Prints the Tracker block to paste into `multitrack_wsgi.py` |
+| 1 | Prompts for `MULTITRACK_GPG_PASSPHRASE` (min 12 chars, confirmed) |
+| 2 | Installs `flask` and `werkzeug` via pip |
+| 3 | Seeds `trackerWeb/Accts/pw.json.gpg` with `webadmin / WebAdmin0!` |
+| 4 | Generates `WEB_SECRET_KEY`; stores it in `pw.json.gpg` under `_wsadmin.notes` |
+| 5 | Prints the complete ready-to-paste `~/multitrack_wsgi.py` content |
 
-**Save the printed output** — you need the passphrase and secret key in
-the next step.
+**Copy the printed WSGI block** — you need it in Step 3.
 
 ---
 
-### 4.6 Step 4 — Create `~/multitrack_wsgi.py`
+### 4.5 Step 3 — Create `~/multitrack_wsgi.py`
 
 ```bash
 nano ~/multitrack_wsgi.py
 ```
 
-Paste and fill in values from Step 3:
+Paste the block printed by the setup script (credentials are already
+filled in). It will look like:
 
 ```python
 import sys, os
@@ -360,64 +329,86 @@ from pathlib import Path
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from werkzeug.exceptions import NotFound
 
-# ── Platform core (multitrack/ + trackerWeb/) ─────────────────────────────────
-_pkg = str(Path.home() / "pyMultiTaskWS")
+# ── pyMultiTaskWS root ────────────────────────────────────────────────────────
+_pkg = '/home/<pa-user>/pyMultiTaskWS'
 if _pkg not in sys.path:
     sys.path.insert(0, _pkg)
 
-# ── TrackerWeb — smoke-test (comment out in production if not needed) ─────────
-os.environ.setdefault("MULTITRACK_GPG_PASSPHRASE", "<your-trackerWeb-passphrase>")
+# ── TrackerWeb ────────────────────────────────────────────────────────────────
+os.environ.setdefault('MULTITRACK_GPG_PASSPHRASE', '<your-passphrase>')
+os.environ.setdefault('WEB_SECRET_KEY',            '<generated-key>')
 from trackerWeb.wsgi import application as web_app
 
-# ── LLC Tracker ───────────────────────────────────────────────────────────────
-os.environ.setdefault("LLC_GPG_PASSPHRASE", "<llc-passphrase-from-setup>")
-os.environ.setdefault("LLC_SECRET_KEY",     "<llc-secret-key-from-setup>")
-sys.path.insert(0, str(Path.home() / "llc/LLC-WB-Group/pages/AccountingData/Notebooks"))
-from wsgi import application as llc_app
+# ── LLC Tracker (uncomment after running LLC setup) ───────────────────────────
+# os.environ.setdefault('LLC_GPG_PASSPHRASE', '<llc-passphrase>')
+# os.environ.setdefault('LLC_SECRET_KEY',     '<llc-secret-key>')
+# sys.path.insert(0, '/home/<pa-user>/llc/LLC-WB-Group/pages/AccountingData/Notebooks')
+# from wsgi import application as llc_app
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 application = DispatcherMiddleware(NotFound(), {
-    "/web": web_app,
-    "/llc": llc_app,
+    '/web': web_app,
+    # '/llc': llc_app,
 })
 ```
 
-> **Security:** `multitrack_wsgi.py` is owner-readable only (`chmod 600
-> ~/multitrack_wsgi.py`). Never commit it to any git repo — it contains
-> plaintext credentials.
+Lock down the file — it contains plaintext credentials:
 
 ```bash
 chmod 600 ~/multitrack_wsgi.py
 ```
 
+> **Never commit `~/multitrack_wsgi.py` to any git repo.**
+
 ---
 
-### 4.7 Step 5 — Reload and Test
+### 4.6 Step 4 — Reload and Test
 
 1. PA **Web tab → Reload** button.
 2. Visit `https://<pa-user>.pythonanywhere.com/web/login`
-   → Sign in: `webadmin / WebAdmin0!`
-   → Check the **Mount point** row shows `/web`
-3. Visit `https://<pa-user>.pythonanywhere.com/llc/login`
-   → Sign in: `llcgroupmgr / llcManager0!`
+   - Sign in: `webadmin / WebAdmin0!`
+   - Verify the **Mount point** row on the home page shows `/web`
+
+If the mount point shows `/web` (not `/`), the dispatcher is working
+correctly.
 
 ---
 
-### 4.8 Adding a Future Tracker
+### 4.7 Adding the LLC Tracker
+
+Once TrackerWeb confirms the platform is running, add the LLC Tracker:
 
 ```bash
-# 1. Clone into a new TrackerID directory
+# 1. Clone the LLC repo
+mkdir -p ~/llc
+cd ~/llc
+git clone https://github.com/wbgroupmgr/LLC-WB-Group.git
+
+# 2. Run the LLC setup script (installs deps, seeds user DB, prints credentials)
+cd ~/llc/LLC-WB-Group/pages/AccountingData/Notebooks
+pip install --user flask pandas numpy pypdf werkzeug deepdiff
+python3.10 setupWebServerCmd.py
+
+# 3. Edit ~/multitrack_wsgi.py — uncomment the LLC block, paste printed credentials
+
+# 4. PA Web tab → Reload
+```
+
+After reload, visit `https://<pa-user>.pythonanywhere.com/llc/login`.
+
+---
+
+### 4.8 Adding Any Future Tracker
+
+```bash
+# 1. Clone into its TrackerID directory
 mkdir -p ~/trackHealth
 cd ~/trackHealth
 git clone https://github.com/<org>/<health-repo>.git
 
-# 2. Run setup script (prints the block to add to multitrack_wsgi.py)
-python3.10 ~/pyMultiTaskWS/setup/setupWebServerCmd.py \
-    --tracker-name "Health Tracker" \
-    --tracker-id   trackHealth \
-    --db           ~/trackHealth/<repo>/Accts/pw.json.gpg \
-    --notebooks    ~/trackHealth/<repo>/path/to/notebooks \
-    --seed-user    admin --seed-pass "Admin0Pass!"
+# 2. Run that Tracker's setup script
+cd ~/trackHealth/<repo>/...
+python3.10 setupWebServerCmd.py   # or setup/setupWebServerCmd.py
 
 # 3. Edit ~/multitrack_wsgi.py — add the printed block + mount
 
@@ -522,6 +513,7 @@ Add `**/Accts/*.gpg` to the Tracker's `.gitignore`.
 
 | File | Scope | Purpose |
 |------|-------|---------|
+| `setupWebServerCmd.py` | Platform | One-shot interactive PA setup — run this first |
 | `~/multitrack_wsgi.py` | Platform | Dispatcher; mounts Trackers; holds credentials |
 | `multitrack/auth.py` | Platform | Shared auth — import in every Tracker |
 | `multitrack/templates/login.html` | Platform | Generic login page |
