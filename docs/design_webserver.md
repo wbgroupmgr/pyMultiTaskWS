@@ -278,7 +278,7 @@ runs — delete `trackerWeb/Accts/pw.json.gpg` to reset to a clean state.
    - Python version: **3.10**
 3. In the **Code** section:
    - **WSGI configuration file** → `/home/<pa-user>/multitrack_wsgi.py`
-   - **Source code** → `/home/<pa-user>/`
+   - **Source code** → `/home/<pa-user>/pyMultiTaskWS/`
 
 ---
 
