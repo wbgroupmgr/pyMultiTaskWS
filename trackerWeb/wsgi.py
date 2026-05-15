@@ -1,12 +1,19 @@
 """
 trackerWeb/wsgi.py — WSGI entry point for the TrackerWeb Tracker.
 
-Standalone (local test, no dispatcher):
-    MULTITRACK_GPG_PASSPHRASE=test1234567890 python trackerWeb/wsgi.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ON PYTHONANYWHERE — do NOT run this file with Python.
+PA imports it via multitrack_wsgi.py. Hit Reload in the Web tab.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LOCAL TESTING ONLY — standalone (no dispatcher, mounted at /):
+    export MULTITRACK_GPG_PASSPHRASE=test1234567890
+    python trackerWeb/wsgi.py
+    → http://127.0.0.1:8081/login  (webadmin / WebAdmin0!)
 
 Via DispatcherMiddleware (multitrack_wsgi.py):
-    Mount point: /web
-    Exposes:     application
+    Mount point : /web
+    Exposes     : application
 """
 
 import os
@@ -50,7 +57,7 @@ _app_obj   = TrackerWebApp(db_path=_DB_PATH, tracker_name="TrackerWeb")
 application = _app_obj.app
 
 if __name__ == "__main__":
-    # Run standalone without the dispatcher (useful for local smoke-test)
-    print("Starting TrackerWeb standalone on http://127.0.0.1:5001")
+    # LOCAL TESTING ONLY — PA never executes this block.
+    print("Starting TrackerWeb standalone on http://127.0.0.1:8081")
     print("Default credentials: webadmin / WebAdmin0!")
-    application.run(debug=True, port=5001)
+    application.run(debug=True, port=8081)

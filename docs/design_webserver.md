@@ -175,16 +175,19 @@ export MULTITRACK_GPG_PASSPHRASE="localtest1234"
 
 The simplest path: runs only TrackerWeb, no dispatcher, mounted at `/`.
 
+> **Local machines only.** Never run with `python` on PythonAnywhere —
+> PA imports the file automatically. See Section 4.
+
 ```bash
 python trackerWeb/wsgi.py
 ```
 
 ```
-Starting TrackerWeb standalone on http://127.0.0.1:5001
+Starting TrackerWeb standalone on http://127.0.0.1:8081
 Default credentials: webadmin / WebAdmin0!
 ```
 
-Visit **http://127.0.0.1:5001/login** and sign in.
+Visit **http://127.0.0.1:8081/login** and sign in.
 
 On first run `trackerWeb/wsgi.py` auto-seeds `trackerWeb/Accts/pw.json.gpg`
 with the default account. No separate setup step is needed.
@@ -194,16 +197,20 @@ with the default account. No separate setup step is needed.
 Runs the `DispatcherMiddleware` exactly as it runs on PA. TrackerWeb is
 mounted at `/web`.
 
+> **Local machines only.** On PythonAnywhere, the PA WSGI server imports
+> `multitrack_wsgi.py` directly — running it with `python` will fail with
+> "Address already in use" because PA's server already owns those ports.
+
 ```bash
 python multitrack_wsgi.py
 ```
 
 ```
-MultiTrack dispatcher on http://127.0.0.1:5000
+MultiTrack dispatcher on http://127.0.0.1:8080
   /web  → TrackerWeb  (webadmin / WebAdmin0!)
 ```
 
-Visit **http://127.0.0.1:5000/web/login** and sign in.
+Visit **http://127.0.0.1:8080/web/login** and sign in.
 
 ### 3.6 What to Verify on the Home Page
 

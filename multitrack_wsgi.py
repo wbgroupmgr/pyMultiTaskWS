@@ -1,8 +1,16 @@
 """
 multitrack_wsgi.py — Platform dispatcher for PythonAnywhere.
 
-Copy this file to ~/multitrack_wsgi.py on PA and fill in the blanks.
-The PA WSGI configuration file field should point here.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ON PYTHONANYWHERE — do NOT run this file with Python.
+PA's WSGI server imports it automatically and calls `application`.
+Point the PA WSGI config file field to this path and hit Reload.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LOCAL TESTING ONLY — run the dispatcher on your own machine:
+    export MULTITRACK_GPG_PASSPHRASE=test1234567890
+    python multitrack_wsgi.py
+    → http://127.0.0.1:8080/web/login  (webadmin / WebAdmin0!)
 
 Each Tracker block:
   1. Sets the Tracker's env vars (GPG passphrase + Flask secret key).
@@ -11,9 +19,6 @@ Each Tracker block:
 
 The DispatcherMiddleware routes requests by URL prefix to the correct
 Tracker. Unmatched prefixes return 404.
-
-Local smoke-test (runs TrackerWeb only, no LLC):
-    MULTITRACK_GPG_PASSPHRASE=test1234567890 python multitrack_wsgi.py
 """
 
 import sys
@@ -53,8 +58,8 @@ application = DispatcherMiddleware(NotFound(), {
 })
 
 if __name__ == "__main__":
-    # Local smoke-test: run the full dispatcher on port 5000
+    # LOCAL TESTING ONLY — PA never executes this block.
     from werkzeug.serving import run_simple
-    print("MultiTrack dispatcher on http://127.0.0.1:5000")
+    print("MultiTrack dispatcher on http://127.0.0.1:8080")
     print("  /web  → TrackerWeb  (webadmin / WebAdmin0!)")
-    run_simple("127.0.0.1", 5000, application, use_reloader=True, use_debugger=True)
+    run_simple("127.0.0.1", 8080, application, use_reloader=True, use_debugger=True)
