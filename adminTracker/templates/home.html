@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{{ tracker_name }} — Status</title>
+  <title>{{ tracker_name }} — Dashboard</title>
   <style>
     :root {
       --ink:        #1a1a18;
@@ -17,6 +17,9 @@
       --green:      #166534;
       --green-bg:   #dcfce7;
       --green-bdr:  #86efac;
+      --amber:      #92400e;
+      --amber-bg:   #fef3c7;
+      --amber-bdr:  #fcd34d;
       --radius:     10px;
       --mono:       'Courier New', monospace;
     }
@@ -33,6 +36,9 @@
         --green:     #86efac;
         --green-bg:  #052e16;
         --green-bdr: #166534;
+        --amber:     #fcd34d;
+        --amber-bg:  #451a03;
+        --amber-bdr: #92400e;
       }
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -44,7 +50,7 @@
 
     /* ── Top bar ── */
     .topbar {
-      max-width: 640px; margin: 0 auto 2rem;
+      max-width: 720px; margin: 0 auto 2rem;
       display: flex; align-items: center; gap: 12px;
     }
     .monogram {
@@ -56,10 +62,8 @@
     }
     .topbar-title { font-size: 16px; letter-spacing: 0.02em; }
     .topbar-sub { font-size: 11px; color: var(--ink-faint); font-family: var(--mono); margin-top: 2px; }
-    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; }
-    .user-chip {
-      font-family: var(--mono); color: var(--ink-muted); font-size: 12px;
-    }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .user-chip { font-family: var(--mono); color: var(--ink-muted); font-size: 12px; }
     .btn-signout {
       font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em;
       padding: 5px 12px; border-radius: 6px;
@@ -69,8 +73,8 @@
     }
     .btn-signout:hover { background: var(--card); color: var(--ink); }
 
-    /* ── Cards ── */
-    .stack { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    /* ── Layout ── */
+    .stack { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .card {
       background: var(--card); border: 0.5px solid var(--border);
       border-radius: var(--radius); padding: 1.5rem;
@@ -81,31 +85,66 @@
       margin-bottom: 1rem;
     }
 
-    /* ── Status badge ── */
+    /* ── Platform status badge ── */
     .status-badge {
       display: inline-flex; align-items: center; gap: 10px;
       background: var(--green-bg); color: var(--green);
       border: 0.5px solid var(--green-bdr);
       border-radius: 8px; padding: 12px 18px;
-      font-size: 15px; font-weight: normal; letter-spacing: 0.01em;
-      width: 100%;
+      font-size: 15px; width: 100%;
     }
     .status-dot {
       width: 10px; height: 10px; border-radius: 50%;
       background: var(--green); flex-shrink: 0;
       animation: pulse 2s ease-in-out infinite;
     }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: .4; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+    /* ── Tracker apps list ── */
+    .tracker-list { display: flex; flex-direction: column; gap: 10px; }
+    .tracker-item {
+      display: flex; align-items: center; gap: 14px;
+      padding: 12px 14px; border-radius: 8px;
+      border: 0.5px solid var(--border); background: var(--surface);
+      transition: background .12s;
+    }
+    .tracker-item:hover { background: var(--accent-bg); }
+    .tracker-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .tracker-dot.online  { background: var(--green); }
+    .tracker-dot.offline { background: var(--amber); }
+    .tracker-meta { flex: 1; min-width: 0; }
+    .tracker-name {
+      font-size: 14px; font-weight: normal; letter-spacing: 0.01em;
+    }
+    .tracker-desc {
+      font-size: 11px; color: var(--ink-faint);
+      font-family: var(--mono); margin-top: 2px;
+    }
+    .tracker-mount {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--ink-faint); letter-spacing: 0.03em;
+      flex-shrink: 0;
+    }
+    .btn-open {
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em;
+      padding: 5px 14px; border-radius: 6px;
+      background: none; border: 0.5px solid var(--border);
+      color: var(--accent); cursor: pointer; text-decoration: none;
+      flex-shrink: 0; transition: background .12s, color .12s;
+    }
+    .btn-open:hover { background: var(--accent); color: var(--card); }
+
+    .no-trackers {
+      font-family: var(--mono); font-size: 12px;
+      color: var(--ink-faint); text-align: center; padding: 1rem 0;
     }
 
     /* ── Info table ── */
     .info-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .info-table td {
-      padding: 7px 0;
-      border-bottom: 0.5px solid var(--border);
-      vertical-align: top;
+      padding: 7px 0; border-bottom: 0.5px solid var(--border); vertical-align: top;
     }
     .info-table tr:last-child td { border-bottom: none; }
     .info-table td:first-child {
@@ -117,7 +156,7 @@
 
     /* ── Footer ── */
     .footer {
-      max-width: 640px; margin: 2rem auto 0;
+      max-width: 720px; margin: 2rem auto 0;
       font-size: 11px; color: var(--ink-faint); font-family: var(--mono);
       letter-spacing: 0.04em; text-align: center;
     }
@@ -149,27 +188,26 @@
       </div>
     </div>
 
-    <!-- Tracker info -->
+    <!-- Tracker apps -->
     <div class="card">
-      <div class="card-title">Tracker</div>
-      <table class="info-table">
-        <tr>
-          <td>Name</td>
-          <td>{{ tracker_name }}</td>
-        </tr>
-        <tr>
-          <td>Version</td>
-          <td>{{ version }}</td>
-        </tr>
-        <tr>
-          <td>Mount point</td>
-          <td>{{ request.script_name or "/" }}</td>
-        </tr>
-        <tr>
-          <td>User DB</td>
-          <td>{{ db_path }}</td>
-        </tr>
-      </table>
+      <div class="card-title">Tracker Apps</div>
+      {% if trackers %}
+        <div class="tracker-list">
+          {% for t in trackers %}
+          <div class="tracker-item">
+            <span class="tracker-dot {{ t.get('status', 'online') }}"></span>
+            <div class="tracker-meta">
+              <div class="tracker-name">{{ t.name }}</div>
+              <div class="tracker-desc">{{ t.get('description', '') }}</div>
+            </div>
+            <span class="tracker-mount">{{ t.mount }}</span>
+            <a class="btn-open" href="{{ t.url }}">Open &rarr;</a>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="no-trackers">No tracker apps registered.</div>
+      {% endif %}
     </div>
 
     <!-- Session info -->
@@ -208,7 +246,7 @@
           <td>{{ flask_version }}</td>
         </tr>
         <tr>
-          <td>SCRIPT_NAME</td>
+          <td>Mount point</td>
           <td>{{ request.script_name or '(none — standalone)' }}</td>
         </tr>
         <tr>
@@ -221,7 +259,7 @@
   </div>
 
   <div class="footer">
-    MultiTrack Web Platform &mdash; TrackerWeb test application
+    MultiTrack Web Platform &mdash; AdminTracker
   </div>
 
 </body>

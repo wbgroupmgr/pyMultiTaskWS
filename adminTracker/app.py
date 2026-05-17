@@ -1,12 +1,11 @@
 """
-trackerWeb/app.py
-=================
-Minimal reference-implementation Tracker for testing the MultiTrack
-Web Platform dispatcher.
+adminTracker/app.py
+===================
+Platform administration Tracker for MultiTrack Web Platform.
 
-Mount point: /web
-Home page  : /web/  (requires login)
-Auth       : /web/login  /web/logout  /web/register
+Mount point: /admin
+Home page  : /admin/  (requires login — shows all registered tracker apps)
+Auth       : /admin/login  /admin/logout  /admin/register
 """
 
 import os
@@ -24,10 +23,11 @@ _HERE = Path(__file__).resolve().parent
 VERSION = "0.1.0"
 
 
-class TrackerWebApp:
-    def __init__(self, db_path: Path, tracker_name: str = "TrackerWeb"):
+class AdminTrackerApp:
+    def __init__(self, db_path: Path, trackers: list = None, tracker_name: str = "AdminTracker"):
         self.tracker_name = tracker_name
         self.db_path      = db_path
+        self.trackers     = trackers or []
 
         self.app = Flask(
             __name__,
@@ -54,8 +54,8 @@ class TrackerWebApp:
         self._bind_routes()
 
     def _bind_routes(self):
-        app          = self.app
-        tracker_name = self.tracker_name
+        app      = self.app
+        trackers = self.trackers
 
         @app.route("/")
         def home():
@@ -64,4 +64,5 @@ class TrackerWebApp:
                 python_version=platform.python_version(),
                 flask_version=flask.__version__,
                 db_path=str(self.db_path),
+                trackers=trackers,
             )
