@@ -154,6 +154,17 @@
     }
     .info-table td:last-child { font-family: var(--mono); font-size: 12px; }
 
+    /* ── Stop server ── */
+    .stop-row { display: flex; align-items: center; gap: 14px; margin-top: 1rem; }
+    .btn-stop {
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em;
+      padding: 6px 16px; border-radius: 6px; cursor: pointer;
+      background: none; border: 0.5px solid #dc2626; color: #dc2626;
+      transition: background .12s, color .12s;
+    }
+    .btn-stop:hover { background: #dc2626; color: #fff; }
+    .stop-hint { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+
     /* ── Footer ── */
     .footer {
       max-width: 720px; margin: 2rem auto 0;
@@ -185,6 +196,13 @@
       <div class="status-badge">
         <span class="status-dot"></span>
         MultiTrack Web Platform — Online
+      </div>
+      <div class="stop-row">
+        <form method="POST" action="{{ url_for('stop_web') }}"
+              onsubmit="return confirm('Stop the web server? All active sessions will be terminated.');">
+          <button type="submit" class="btn-stop">&#9632; Stop Server</button>
+        </form>
+        <span class="stop-hint">Terminates the WSGI process — all sessions end immediately.</span>
       </div>
     </div>
 

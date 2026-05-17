@@ -11,10 +11,11 @@ Auth       : /admin/login  /admin/logout  /admin/register
 import os
 import platform
 import secrets
+import signal
 from pathlib import Path
 
 import flask
-from flask import Flask, render_template, session
+from flask import Flask, jsonify, render_template, session
 
 from multitrack.auth import ALLOWED_ROLES, make_auth_routes
 
@@ -66,3 +67,30 @@ class AdminTrackerApp:
                 db_path=str(self.db_path),
                 trackers=trackers,
             )
+
+        @app.route("/stop", methods=["POST"])
+        def stop_web():
+            # FIXME: Before killing, async-notify each registered Tracker that the
+            # server is going down in 2 minutes so they can log users off gracefully.
+            #
+            # Design sketch:
+            #   from adminTracker import registry
+            #   import threading, time, requests
+            #
+            #   def _notify_and_kill():
+            #       for t in registry.TRACKERS:
+            #           shutdown_url = t.get("url", "").rstrip("/") + "/notify/shutdown"
+            #           try:
+            #               requests.post(shutdown_url, json={"countdown": 120}, timeout=2)
+            #           except Exception:
+            #               pass   # best-effort; don't block the shutdown
+            #       time.sleep(120)
+            #       os.kill(os.getpid(), signal.SIGTERM)
+            #
+            #   threading.Thread(target=_notify_and_kill, daemon=True).start()
+            #   return jsonify({"status": "shutdown_scheduled", "countdown": 120})
+            #
+            # Each Tracker must implement POST /<tracker>/notify/shutdown and
+            # broadcast a "server going down" banner to active sessions.
+            os.kill(os.getpid(), signal.SIGTERM)
+            return ("", 204)
