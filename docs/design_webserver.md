@@ -101,19 +101,14 @@ Browser → WSGI server
 
 ```json
 {
-  "MULTITRACK_GPG_PASSPHRASE": "...",
+  "WEB_GPG_PASSPHRASE": "...",
   "WEB_SECRET_KEY": "...",
   "WebServer": "Host_wbgroup",
-  "Trackers": [
-    {
-      "name":        "AdminTracker",
-      "mount":       "/admin",
-      "url":         "/admin/",
-      "description": "Platform administration — user management & tracker index",
-      "status":      "online",
-      "builtin":     true
-    }
-  ]
+  "Trackers": [ ... ],
+  "adminTracker": {
+    "APP_GPG_PASSPHRASE": "<master>_adminTracker",
+    "WEB_SECRET_KEY": "..."
+  }
 }
 ```
 
@@ -174,7 +169,7 @@ any other. There is no cross-Tracker single sign-on.
 - `load_users` / `save_users` / `find_user` — GPG-encrypted JSON DB helpers.
 - `hash_password` — SHA-256 hex digest.
 
-All Trackers share the same `MULTITRACK_GPG_PASSPHRASE` for their user DBs.
+Each Tracker uses its own `APP_GPG_PASSPHRASE` (derived as `<master>_<stanza_key>`) for its user DB.
 
 ---
 
@@ -231,6 +226,8 @@ The `--setup` command installs Flask and Werkzeug, seeds the adminTracker user D
 and writes `~/.MultiTaskWS/MultiTaskWS_config.json`.
 
 ### 3.3 Start Locally
+
+> **Prerequisite:** run `python3 wsCmd.py --setup` once before starting (see §3.2).
 
 **Option A — Full dispatcher (recommended):**
 
@@ -338,10 +335,10 @@ python3.10 wsCmd.py --setup
 
 | Step | Action |
 |------|--------|
-| 1 | Prompts for `MULTITRACK_GPG_PASSPHRASE` (min 12 chars, confirmed) |
+| 1 | Prompts for master passphrase → stored as `WEB_GPG_PASSPHRASE` (min 12 chars, confirmed) |
 | 2 | Installs `flask` and `werkzeug` via pip |
-| 3 | Seeds `adminTracker/Accts/pw.json.gpg` with `webadmin / WebAdmin0!` |
-| 4 | Generates `WEB_SECRET_KEY`; writes `~/.MultiTaskWS/MultiTaskWS_config.json` |
+| 3 | Derives `adminTracker.APP_GPG_PASSPHRASE = <master>_adminTracker`; writes `~/.MultiTaskWS/MultiTaskWS_config.json` |
+| 4 | Seeds `adminTracker/Accts/pw.json.gpg` with `webadmin / WebAdmin0!` |
 
 ---
 
@@ -417,7 +414,7 @@ See `adminTracker/app.py` for the complete reference pattern.
 ### 5.2 Required: `wsCmd.py` Per Tracker
 
 Every Tracker has `wsCmd.py` with `--setup` (DB reseed) and `--start` (standalone).
-`--setup` reads `MULTITRACK_GPG_PASSPHRASE` from env or from
+`--setup` reads `APP_GPG_PASSPHRASE` from the tracker's own stanza in
 `~/.MultiTaskWS/MultiTaskWS_config.json`. It does **not** prompt for the passphrase
 (platform `wsCmd.py --setup` handles that).
 
@@ -486,7 +483,7 @@ Each Tracker stores `Accts/pw.json.gpg` within its own repo. Add `**/Accts/*.gpg
 | Concern | Approach |
 |---------|---------|
 | Credentials in config | `~/.MultiTaskWS/MultiTaskWS_config.json` is `chmod 600`; never in git |
-| GPG passphrase | Shared across Trackers; passed to `gpg` via `os.pipe()` — invisible in `ps aux` |
+| GPG passphrase | Per-tracker `APP_GPG_PASSPHRASE` derived from master; passed to `gpg` via `os.pipe()` — invisible in `ps aux` |
 | Flask secret key | Generated at setup; stored in platform config |
 | User passwords | SHA-256 hashed; plaintext never written to disk |
 | Cross-Tracker isolation | Separate user DBs, separate Flask secret keys |
