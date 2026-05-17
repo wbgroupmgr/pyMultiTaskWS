@@ -17,13 +17,12 @@ The `pyMultiTaskWS` package provides the **platform-level core services**:
 
 | Service | Module | Purpose |
 |---------|--------|---------|
-| Dispatcher | `multitrack_wsgi.py` | Routes requests by URL prefix to the correct Tracker |
-| Auth | `multitrack/auth.py` | GPG-encrypted user DB, Flask login routes, `login_required` decorator |
+| Platform CLI | `wsCmd.py` | `--setup` (config + DB seed) and `--start` (full dispatcher) |
+| Dispatcher | `wsgi.py` | PA entry point — imports `WsCmd().make_application()` |
+| Auth | `multitrack/auth.py` | GPG-encrypted user DB, Flask login routes, `login_required` |
 | Templates | `multitrack/templates/` | Generic `login.html` and `register.html` (Tracker may override) |
-| Admin | `adminTracker/` | Platform administration Tracker — login, user mgmt, tracker index |
-| Registry | `adminTracker/registry.py` | Tracker list injected by dispatcher; displayed on admin home page |
-| Setup | `setupWebServerCmd.py` | Interactive one-shot PA setup (seeds adminTracker, prints wsgi block) |
-| Seed | `setup/init_userdb.py` | CLI seed tool for Tracker user DBs |
+| Admin | `adminTracker/` | Platform administration Tracker — tracker index + login |
+| Registry | `adminTracker/registry.py` | Tracker list injected by `make_application()`; displayed on home page |
 
 This pattern maps to standard enterprise web-design concepts:
 
@@ -38,12 +37,40 @@ This pattern maps to standard enterprise web-design concepts:
 
 ---
 
-### 1.2 Component Hierarchy
+### 1.2 wsCmd.py Pattern — Platform and Per-Tracker
+
+Every level of the platform has exactly one `wsCmd.py`:
+
+| File | Scope | `--setup` | `--start` |
+|------|-------|-----------|-----------|
+| `wsCmd.py` | **Platform** | Interactive setup: passphrase, deps, adminTracker DB seed, write `~/.MultiTaskWS/MultiTaskWS_config.json` | Full WSGI dispatcher (all Trackers via DispatcherMiddleware) |
+| `adminTracker/wsCmd.py` | **AdminTracker** | Reseed adminTracker user DB (reads passphrase from platform config) | AdminTracker standalone, no dispatcher prefix |
+| `<tracker>/wsCmd.py` | **Tracker** | Tracker-specific setup (reads passphrase from platform config) | Tracker standalone |
+
+**Typical workflow:**
+
+```bash
+# 1. First time setup (platform level):
+python3 wsCmd.py --setup
+
+# 2. Start full dispatcher locally:
+python3 wsCmd.py --start
+
+# 3. Start individual Tracker for dev:
+python3 adminTracker/wsCmd.py --start
+
+# 4. Reseed a Tracker's user DB:
+python3 adminTracker/wsCmd.py --setup --reset
+```
+
+---
+
+### 1.3 Component Hierarchy
 
 ```
-pyMultiTaskWS (DispatcherMiddleware)
-│   multitrack_wsgi.py routes requests by URL prefix.
-│   Unmatched prefixes return 404.
+pyMultiTaskWS (DispatcherMiddleware — built by WsCmd.make_application())
+│   wsgi.py → WsCmd().make_application()   (PA entry point)
+│   wsCmd.py --start                        (local entry point)
 │
 ├── /admin  ─────────────→  AdminTracker  (platform administration)
 │                               └── Flask app  ←  adminTracker/wsgi.py
@@ -60,14 +87,64 @@ pyMultiTaskWS (DispatcherMiddleware)
 
 ```
 Browser → WSGI server
-       → multitrack_wsgi.py  (strips prefix, sets SCRIPT_NAME)
-       → Tracker Flask app   (sees only its own sub-path)
-       → Response            (Flask reconstructs full URLs via SCRIPT_NAME)
+       → wsgi.py  (imports make_application())
+       → DispatcherMiddleware  (strips prefix, sets SCRIPT_NAME)
+       → Tracker Flask app     (sees only its own sub-path)
+       → Response              (Flask reconstructs full URLs via SCRIPT_NAME)
 ```
 
 ---
 
-### 1.3 URL Namespace
+### 1.4 Platform Config — `~/.MultiTaskWS/MultiTaskWS_config.json`
+
+`wsCmd.py --setup` writes the platform config to `~/.MultiTaskWS/`. This file holds:
+
+```json
+{
+  "MULTITRACK_GPG_PASSPHRASE": "...",
+  "WEB_SECRET_KEY": "...",
+  "WebServer": "Host_wbgroup",
+  "Trackers": [
+    {
+      "name":        "AdminTracker",
+      "mount":       "/admin",
+      "url":         "/admin/",
+      "description": "Platform administration — user management & tracker index",
+      "status":      "online",
+      "builtin":     true
+    }
+  ]
+}
+```
+
+Each Tracker entry in `Trackers` is used to:
+- Populate `adminTracker.registry.TRACKERS` (shown on the admin home page)
+- Mount the Tracker's Flask app in the dispatcher
+
+External Trackers (not built into this repo) also carry `sys_path` and `env`:
+
+```json
+{
+  "name":        "LLC Accounting",
+  "mount":       "/llc",
+  "url":         "/llc/login",
+  "description": "W&B Group LLC — double-entry ledger & IRS forms",
+  "status":      "online",
+  "sys_path":    "/home/wbgroup/llc/LLC-WB-Group/pages/AccountingData/Notebooks",
+  "env": {
+    "LLC_GPG_PASSPHRASE": "...",
+    "LLC_SECRET_KEY":     "..."
+  }
+}
+```
+
+`make_application()` iterates the list, sets env vars, adds sys_path, and imports each Tracker's `wsgi.py` via `importlib.util.spec_from_file_location`.
+
+File is `chmod 600` — owner-readable only. Never committed to git.
+
+---
+
+### 1.5 URL Namespace
 
 Every Tracker owns a distinct URL subtree:
 
@@ -76,15 +153,14 @@ https://<host>/<TrackerID>/
     ├── <TrackerID>/login       ← login page
     ├── <TrackerID>/            ← home (requires login)
     ├── <TrackerID>/view/<...>  ← Tracker views
-    └── <TrackerID>/api/<...>   ← Tracker API (returns JSON 401 if not logged in)
+    └── <TrackerID>/api/<...>   ← Tracker API (JSON 401 if not logged in)
 ```
 
-The `<TrackerID>` must be globally unique across the Platform and is used
-as both the URL mount point and the directory name on disk.
+The `<TrackerID>` must be globally unique across the Platform and matches the `mount` value in the config (e.g., `admin`, `llc`, `health`).
 
 ---
 
-### 1.4 Authentication Model
+### 1.6 Authentication Model
 
 Each Tracker maintains its **own independent user database**
 (`Accts/pw.json.gpg`). Users registered in one Tracker have no access to
@@ -93,12 +169,12 @@ any other. There is no cross-Tracker single sign-on.
 `multitrack.auth` provides:
 
 - `make_auth_routes(app, db_path, tracker_name, ...)` — registers
-  `/login`, `/logout`, `/register` and installs a `before_request` guard
-  protecting all other routes automatically.
-- `login_required` — decorator for per-route protection (alternative to
-  the global guard).
+  `/login`, `/logout`, `/register` and installs a `before_request` guard.
+- `login_required` — decorator for per-route protection.
 - `load_users` / `save_users` / `find_user` — GPG-encrypted JSON DB helpers.
 - `hash_password` — SHA-256 hex digest.
+
+All Trackers share the same `MULTITRACK_GPG_PASSPHRASE` for their user DBs.
 
 ---
 
@@ -107,8 +183,8 @@ any other. There is no cross-Tracker single sign-on.
 ```
 pyMultiTaskWS/
 │
-├── setupWebServerCmd.py        ← One-shot interactive PA setup (run this first)
-├── multitrack_wsgi.py          ← Dispatcher (PA imports this; runnable locally too)
+├── wsCmd.py                    ← Platform CLI: --setup and --start
+├── wsgi.py                     ← PA entry point (thin — calls WsCmd().make_application())
 │
 ├── multitrack/                 ← Platform core package
 │   ├── __init__.py
@@ -119,17 +195,13 @@ pyMultiTaskWS/
 │
 ├── adminTracker/               ← Platform administration Tracker (TrackerID: admin)
 │   ├── __init__.py
-│   ├── registry.py             ← Tracker list; populated by dispatcher before import
+│   ├── registry.py             ← Tracker list; populated by make_application() before import
 │   ├── app.py                  ← AdminTrackerApp (Flask app class)
 │   ├── wsgi.py                 ← WSGI entry point; auto-seeds webadmin user
-│   ├── wsCmd.py                ← CLI setup/start (adapted from LLC wsCmd.py)
-│   ├── Accts/                  ← pw.json.gpg + adminProfile.json (gitignored)
+│   ├── wsCmd.py                ← Tracker-level CLI: --setup (DB reseed) and --start (standalone)
+│   ├── Accts/                  ← pw.json.gpg lives here (gitignored)
 │   └── templates/
-│       └── home.html           ← Tracker index (all registered apps + status)
-│
-├── setup/
-│   ├── __init__.py
-│   └── init_userdb.py          ← CLI seed tool for any Tracker user DB
+│       └── home.html           ← Tracker index — lists all registered apps + status
 │
 └── docs/
     └── design_webserver.md     ← This file
@@ -138,9 +210,6 @@ pyMultiTaskWS/
 ---
 
 ## 3. Local Setup & Smoke Test
-
-Use this section to verify the platform works on a local machine before
-deploying to PythonAnywhere.
 
 ### 3.1 Prerequisites
 
@@ -155,125 +224,85 @@ deploying to PythonAnywhere.
 ```bash
 git clone https://github.com/wbgroupmgr/pyMultiTaskWS.git
 cd pyMultiTaskWS
-pip install flask werkzeug
+python3 wsCmd.py --setup
 ```
 
-No package installation is needed — `multitrack` and `adminTracker` are
-imported directly from the repo root, which `multitrack_wsgi.py` and
-`adminTracker/wsgi.py` both add to `sys.path` automatically.
+The `--setup` command installs Flask and Werkzeug, seeds the adminTracker user DB,
+and writes `~/.MultiTaskWS/MultiTaskWS_config.json`.
 
-### 3.3 Set the GPG Passphrase
+### 3.3 Start Locally
 
-The platform requires `MULTITRACK_GPG_PASSPHRASE` to encrypt/decrypt user
-databases. For local testing any string of 12+ characters works — it
-only needs to be consistent within a single run (the DB is created and
-read with the same passphrase).
+**Option A — Full dispatcher (recommended):**
 
 ```bash
-export MULTITRACK_GPG_PASSPHRASE="localtest1234"
+python3 wsCmd.py --start
 ```
 
-> On Windows PowerShell: `$env:MULTITRACK_GPG_PASSPHRASE = "localtest1234"`
+```
+  MultiTaskWS — Local Start  (http://127.0.0.1:8080)
+  /admin     → AdminTracker
+```
 
-### 3.4 Run Option A — AdminTracker Standalone
+Visit **http://127.0.0.1:8080/admin/login** — sign in: `webadmin / WebAdmin0!`
 
-The simplest path: runs only AdminTracker, no dispatcher, mounted at `/`.
-
-> **Local machines only.** Never run with `python` on PythonAnywhere —
-> PA imports the file automatically. See Section 4.
+**Option B — WSGI mode (mirrors PA stack, no reloader):**
 
 ```bash
-python adminTracker/wsgi.py
+python3 wsCmd.py --start --wsgi
 ```
 
-```
-Starting AdminTracker standalone on http://127.0.0.1:8081
-Default credentials: webadmin / WebAdmin0!
-```
-
-Visit **http://127.0.0.1:8081/login** and sign in.
-
-On first run `adminTracker/wsgi.py` auto-seeds `adminTracker/Accts/pw.json.gpg`
-with the default account. No separate setup step is needed.
-
-Alternatively, use `wsCmd.py` for an explicit setup:
+**Option C — AdminTracker standalone only (for tracker dev):**
 
 ```bash
-python adminTracker/wsCmd.py --setup
-MULTITRACK_GPG_PASSPHRASE=<pp> python adminTracker/wsCmd.py --start
+python3 adminTracker/wsCmd.py --start
 ```
 
-### 3.5 Run Option B — Full Dispatcher (recommended)
+Visit **http://127.0.0.1:8081/login** — mounted at `/` (no prefix).
 
-Runs the `DispatcherMiddleware` exactly as it runs on PA. AdminTracker is
-mounted at `/admin`.
+### 3.4 What to Verify on the Home Page
 
-> **Local machines only.** On PythonAnywhere, the PA WSGI server imports
-> `multitrack_wsgi.py` directly — running it with `python` will fail with
-> "Address already in use" because PA's server already owns those ports.
-
-```bash
-python multitrack_wsgi.py
-```
-
-```
-MultiTrack dispatcher on http://127.0.0.1:8080
-  /admin  → AdminTracker  (webadmin / WebAdmin0!)
-```
-
-Visit **http://127.0.0.1:8080/admin/login** and sign in.
-
-### 3.6 What to Verify on the Home Page
-
-After signing in, the AdminTracker home page (`/admin/`) shows:
+After signing in at `/admin/`, the AdminTracker home page shows:
 
 | Card | What to look for |
 |------|-----------------|
 | **Platform Status** | "MultiTrack Web Platform — Online" badge with pulsing dot |
-| **Tracker Apps** | List of all registered Trackers with name, description, mount, and Open link |
-| **Session** | Your username, role (`member`), and whether the session is persistent |
-| **Runtime → Mount point** | `/admin` (Option B) or `(none — standalone)` (Option A) — confirms `SCRIPT_NAME` is set correctly |
+| **Tracker Apps** | List of all registered Trackers with name, description, mount, Open link |
+| **Runtime → Mount point** | `/admin` (dispatcher mode) or `(none — standalone)` |
 
-> **Key test:** If Mount point shows `/admin` (not `(none)`), the dispatcher
-> is stripping the prefix and setting `SCRIPT_NAME` correctly. All
-> `url_for()` calls will generate paths prefixed with `/admin/`.
+> **Key test:** Mount point `/admin` confirms `SCRIPT_NAME` is set correctly by the dispatcher.
 
-### 3.7 Stopping the Server
+### 3.5 Stopping the Server
 
-`Ctrl-C` in the terminal. The user DB (`pw.json.gpg`) persists between
-runs — delete `adminTracker/Accts/pw.json.gpg` to reset to a clean state.
+`Ctrl-C` in the terminal. The user DB persists between runs — use
+`python3 adminTracker/wsCmd.py --setup --reset` to reset to a clean state.
 
 ---
 
 ## 4. PythonAnywhere Deployment
 
-> PA custom plan assumed (multiple web apps).
-> **Web App 1** = MultiTrack Platform.
+> PA custom plan assumed. **Web App 1** = MultiTrack Platform.
 
 ### 4.1 PA Directory Layout
 
 ```
 /home/wbgroup/
 │
-├── multitrack_wsgi.py          ← Platform WSGI file (PA points here)
-│
-├── pyMultiTaskWS/              ← This repo (platform core)
+├── pyMultiTaskWS/              ← This repo
+│   ├── wsCmd.py                ← Platform CLI
+│   ├── wsgi.py                 ← PA WSGI entry point (point PA here)
 │   ├── multitrack/
-│   ├── adminTracker/
-│   └── setup/
+│   └── adminTracker/
 │
 ├── llc/                        ← TrackerID directory
-│   └── LLC-WB-Group/           ← Tracker git repo
-│       └── pages/AccountingData/
-│           ├── Accts/pw.json.gpg       ← Tracker user DB (not in git)
-│           └── Notebooks/              ← sys.path root
-│               └── wsgi.py             ← Tracker entry point
+│   └── LLC-WB-Group/
+│       └── pages/AccountingData/Notebooks/
+│           └── wsgi.py         ← LLC Tracker entry point
 │
-└── trackHealth/                ← future TrackerID directory
-    └── <repo>/wsgi.py
+└── ~/.MultiTaskWS/
+    └── MultiTaskWS_config.json  ← Platform config (chmod 600, not in git)
 ```
 
-**Convention:** `TrackerID == directory name under /home/wbgroup/`
+**Convention:** `TrackerID == mount point slug == directory name under /home/wbgroup/`
 
 ---
 
@@ -284,12 +313,12 @@ runs — delete `adminTracker/Accts/pw.json.gpg` to reset to a clean state.
    - Framework: **Manual configuration**
    - Python version: **3.10**
 3. In the **Code** section:
-   - **WSGI configuration file** → `/home/<pa-user>/multitrack_wsgi.py`
-   - **Source code** → `/home/<pa-user>/pyMultiTaskWS/`
+   - **WSGI configuration file** → `/home/wbgroup/pyMultiTaskWS/wsgi.py`
+   - **Source code** → `/home/wbgroup/pyMultiTaskWS/`
 
 ---
 
-### 4.3 Step 1 — Bash Console: Clone the Platform Repo
+### 4.3 Step 1 — Clone the Platform Repo
 
 Open a **Bash console** (Dashboard → Consoles → Bash).
 
@@ -300,139 +329,61 @@ git clone https://github.com/wbgroupmgr/pyMultiTaskWS.git
 
 ---
 
-### 4.4 Step 2 — Run the Platform Setup Script
+### 4.4 Step 2 — Run Platform Setup
 
 ```bash
 cd ~/pyMultiTaskWS
-python3.10 setupWebServerCmd.py
+python3.10 wsCmd.py --setup
 ```
-
-The script runs interactively:
 
 | Step | Action |
 |------|--------|
 | 1 | Prompts for `MULTITRACK_GPG_PASSPHRASE` (min 12 chars, confirmed) |
 | 2 | Installs `flask` and `werkzeug` via pip |
 | 3 | Seeds `adminTracker/Accts/pw.json.gpg` with `webadmin / WebAdmin0!` |
-| 4 | Generates `WEB_SECRET_KEY`; stores in `adminProfile.json` + `pw.json.gpg` under `wbgadminWS.notes` |
-| 5 | Prints the complete ready-to-paste `~/multitrack_wsgi.py` content |
-
-**Copy the printed WSGI block** — you need it in Step 3.
+| 4 | Generates `WEB_SECRET_KEY`; writes `~/.MultiTaskWS/MultiTaskWS_config.json` |
 
 ---
 
-### 4.5 Step 3 — Create `~/multitrack_wsgi.py`
-
-```bash
-nano ~/multitrack_wsgi.py
-```
-
-Paste the block printed by the setup script (credentials are already
-filled in). It will look like:
-
-```python
-import sys, os
-from pathlib import Path
-from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from werkzeug.exceptions import NotFound
-
-# ── pyMultiTaskWS root ────────────────────────────────────────────────────────
-_pkg = '/home/wbgroup/pyMultiTaskWS'
-if _pkg not in sys.path:
-    sys.path.insert(0, _pkg)
-
-# ── Tracker registry (shown on AdminTracker home page) ────────────────────────
-import adminTracker.registry as _reg
-_reg.TRACKERS = [
-    {"name": "AdminTracker", "mount": "/admin", "url": "/admin/",
-     "description": "Platform administration", "status": "online"},
-]
-
-# ── AdminTracker ──────────────────────────────────────────────────────────────
-os.environ.setdefault('MULTITRACK_GPG_PASSPHRASE', '<your-passphrase>')
-os.environ.setdefault('WEB_SECRET_KEY',            '<generated-key>')
-from adminTracker.wsgi import application as admin_app
-
-# ── LLC Tracker (uncomment after running LLC setup) ───────────────────────────
-# os.environ.setdefault('LLC_GPG_PASSPHRASE', '<llc-passphrase>')
-# os.environ.setdefault('LLC_SECRET_KEY',     '<llc-secret-key>')
-# sys.path.insert(0, '/home/wbgroup/llc/LLC-WB-Group/pages/AccountingData/Notebooks')
-# from wsgi import application as llc_app
-
-# ── Dispatcher ────────────────────────────────────────────────────────────────
-application = DispatcherMiddleware(NotFound(), {
-    '/admin': admin_app,
-    # '/llc':   llc_app,
-})
-```
-
-Lock down the file — it contains plaintext credentials:
-
-```bash
-chmod 600 ~/multitrack_wsgi.py
-```
-
-> **Never commit `~/multitrack_wsgi.py` to any git repo.**
-
----
-
-### 4.6 Step 4 — Reload and Test
+### 4.5 Step 3 — Reload and Test
 
 1. PA **Web tab → Reload** button.
 2. Visit `https://wbgroup.pythonanywhere.com/admin/login`
    - Sign in: `webadmin / WebAdmin0!`
-   - Verify the **Tracker Apps** card on the home page shows registered Trackers
-   - Verify **Runtime → Mount point** shows `/admin`
-
-If the mount point shows `/admin` (not `(none)`), the dispatcher is working
-correctly.
+   - **Tracker Apps** card shows registered Trackers
+   - **Runtime → Mount point** shows `/admin`
 
 ---
 
-### 4.7 Adding the LLC Tracker
-
-Once TrackerWeb confirms the platform is running, add the LLC Tracker:
+### 4.6 Adding the LLC Tracker
 
 ```bash
 # 1. Clone the LLC repo
-mkdir -p ~/llc
-cd ~/llc
+mkdir -p ~/llc && cd ~/llc
 git clone https://github.com/wbgroupmgr/LLC-WB-Group.git
 
-# 2. Run the LLC setup script (installs deps, seeds user DB, prints credentials)
+# 2. Run LLC setup (sets LLC_GPG_PASSPHRASE, LLC_SECRET_KEY)
 cd ~/llc/LLC-WB-Group/pages/AccountingData/Notebooks
 pip install --user flask pandas numpy pypdf werkzeug deepdiff
-python3.10 setupWebServerCmd.py
+python3.10 wsCmd.py --setup --llcName WBGroupLLC
 
-# 3. Edit ~/multitrack_wsgi.py — uncomment the LLC block, paste printed credentials
-
-# 4. PA Web tab → Reload
-```
-
-After reload, visit `https://<pa-user>.pythonanywhere.com/llc/login`.
-
----
-
-### 4.8 Adding Any Future Tracker
-
-```bash
-# 1. Clone into its TrackerID directory
-mkdir -p ~/trackHealth
-cd ~/trackHealth
-git clone https://github.com/<org>/<health-repo>.git
-
-# 2. Run that Tracker's setup script
-cd ~/trackHealth/<repo>/...
-python3.10 setupWebServerCmd.py   # or setup/setupWebServerCmd.py
-
-# 3. Edit ~/multitrack_wsgi.py — add the printed block + mount
+# 3. Add LLC entry to ~/.MultiTaskWS/MultiTaskWS_config.json:
+#    {
+#      "name": "LLC Accounting", "mount": "/llc", "url": "/llc/login",
+#      "description": "W&B Group LLC — double-entry ledger & IRS forms",
+#      "status": "online",
+#      "sys_path": "/home/wbgroup/llc/LLC-WB-Group/pages/AccountingData/Notebooks",
+#      "env": {"LLC_GPG_PASSPHRASE": "<pp>", "LLC_SECRET_KEY": "<key>"}
+#    }
 
 # 4. PA Web tab → Reload
 ```
 
+After reload, visit `https://wbgroup.pythonanywhere.com/llc/login`.
+
 ---
 
-### 4.9 Updating a Tracker
+### 4.7 Updating a Tracker
 
 ```bash
 cd ~/<trackerid>/<repo>
@@ -446,8 +397,7 @@ git pull origin main
 
 ### 5.1 Required: `wsgi.py` Entry Point
 
-Every Tracker exposes a `wsgi.py` at its `sys.path` root that adds its
-package root to `sys.path` and exposes `application` — the Flask app.
+Every Tracker exposes a `wsgi.py` at its `sys.path` root that exposes `application`.
 
 ```python
 import sys
@@ -460,32 +410,31 @@ _app_obj    = MyTrackerApp(...)
 application = _app_obj.app
 ```
 
-`MyTrackerApp.__init__` calls `make_auth_routes(self.app, db_path, ...)`.
 See `adminTracker/app.py` for the complete reference pattern.
 
 ---
 
-### 5.2 Required: `url_for()` in Templates — No Hardcoded Paths
+### 5.2 Required: `wsCmd.py` Per Tracker
 
-When mounted via `DispatcherMiddleware`, WSGI sets `SCRIPT_NAME`
-(e.g. `/llc`). `url_for()` picks this up automatically; hardcoded strings
-do not.
+Every Tracker has `wsCmd.py` with `--setup` (DB reseed) and `--start` (standalone).
+`--setup` reads `MULTITRACK_GPG_PASSPHRASE` from env or from
+`~/.MultiTaskWS/MultiTaskWS_config.json`. It does **not** prompt for the passphrase
+(platform `wsCmd.py --setup` handles that).
+
+---
+
+### 5.3 Required: `url_for()` in Templates — No Hardcoded Paths
 
 | Pattern | Mounted at `/llc` | Correct? |
 |---|---|---|
 | `action="/login"` | Posts to `/login` (wrong) | ✗ |
-| `href="/logout"` | Navigates to `/logout` (wrong) | ✗ |
 | `action="{{ url_for('login') }}"` | `/llc/login` | ✓ |
-| `href="{{ url_for('logout') }}"` | `/llc/logout` | ✓ |
 | `window.location.href = "/logout"` | `/logout` (wrong) | ✗ |
 | `window.location.href = "{{ url_for('logout') }}"` | `/llc/logout` | ✓ |
 
-The platform templates (`multitrack/templates/`) already use `url_for()`
-throughout. All Tracker-specific templates must follow the same rule.
-
 ---
 
-### 5.3 Required: `multitrack.auth` Integration
+### 5.4 Required: `multitrack.auth` Integration
 
 ```python
 import os, secrets
@@ -493,34 +442,21 @@ from pathlib import Path
 from multitrack.auth import make_auth_routes
 
 self.app.secret_key = os.environ.get("MYTRACKER_SECRET_KEY", secrets.token_hex(32))
-
-make_auth_routes(
-    self.app,
-    db_path=Path("/path/to/Accts/pw.json.gpg"),
-    tracker_name="My Tracker",
-)
+make_auth_routes(self.app, db_path=Path("Accts/pw.json.gpg"), tracker_name="My Tracker")
 ```
 
-The `protect_all=True` default installs a `before_request` guard that
-protects every route except `login`, `logout`, `register`, and `static`.
-API routes under `/api/` get a JSON `{"error": "authentication required"}`
-with HTTP 401 instead of a redirect.
+---
+
+### 5.5 Required: Isolated User DB
+
+Each Tracker stores `Accts/pw.json.gpg` within its own repo. Add `**/Accts/*.gpg` to `.gitignore`.
 
 ---
 
-### 5.4 Required: Isolated User DB
+### 5.6 Recommended: Tracker ID Convention
 
-Each Tracker stores its user database at `Accts/pw.json.gpg` within its
-own repo directory. Passphrases and secret keys are distinct per Tracker.
-Add `**/Accts/*.gpg` to the Tracker's `.gitignore`.
-
----
-
-### 5.5 Recommended: Tracker ID Convention
-
-- Short, lowercase, URL-safe slug: `llc`, `health`, `finance`, `web`
-- Used as: directory name, mount point, and env var prefix (`LLC_`, `HEALTH_`)
-- No hyphens; underscores in Python package names
+- Short, lowercase, URL-safe slug: `admin`, `llc`, `health`
+- Matches: directory name, mount point, env var prefix (`LLC_`, `HEALTH_`)
 
 ---
 
@@ -528,20 +464,20 @@ Add `**/Accts/*.gpg` to the Tracker's `.gitignore`.
 
 | File | Scope | Purpose |
 |------|-------|---------|
-| `setupWebServerCmd.py` | Platform | One-shot interactive PA setup — run this first |
-| `~/multitrack_wsgi.py` | Platform | Dispatcher; mounts Trackers; holds credentials |
+| `wsCmd.py` | Platform | CLI — `--setup` (platform config) and `--start` (full dispatcher) |
+| `wsgi.py` | Platform | PA entry point — thin wrapper around `WsCmd().make_application()` |
+| `~/.MultiTaskWS/MultiTaskWS_config.json` | Platform | Credentials + Tracker list (chmod 600, not in git) |
 | `multitrack/auth.py` | Platform | Shared auth — import in every Tracker |
 | `multitrack/templates/login.html` | Platform | Generic login page |
 | `multitrack/templates/register.html` | Platform | Generic register page |
-| `adminTracker/registry.py` | AdminTracker | Tracker list — populated by dispatcher, shown on home page |
-| `adminTracker/wsgi.py` | AdminTracker | WSGI entry; auto-seeds DB; standalone runnable |
-| `adminTracker/app.py` | AdminTracker | AdminTrackerApp — platform admin Flask class |
-| `adminTracker/wsCmd.py` | AdminTracker | CLI setup/start (local dev only) |
+| `adminTracker/registry.py` | AdminTracker | Tracker list — populated by `make_application()`, shown on home |
+| `adminTracker/wsgi.py` | AdminTracker | WSGI entry point; auto-seeds webadmin user |
+| `adminTracker/app.py` | AdminTracker | `AdminTrackerApp` — Flask class, home page shows tracker list |
+| `adminTracker/wsCmd.py` | AdminTracker | Tracker CLI — `--setup` (DB reseed) and `--start` (standalone) |
 | `adminTracker/templates/home.html` | AdminTracker | Tracker index — lists all registered apps |
-| `setup/init_userdb.py` | Platform | CLI user DB seed tool |
 | `<tracker>/wsgi.py` | Tracker | WSGI entry point; exposes `application` |
+| `<tracker>/wsCmd.py` | Tracker | Tracker CLI — `--setup` and `--start` |
 | `<tracker>/Accts/pw.json.gpg` | Tracker | Encrypted user DB (not in git) |
-| `<tracker>/requirements.txt` | Tracker | Python dependencies |
 
 ---
 
@@ -549,11 +485,11 @@ Add `**/Accts/*.gpg` to the Tracker's `.gitignore`.
 
 | Concern | Approach |
 |---------|---------|
-| Credentials in WSGI | `~/multitrack_wsgi.py` is owner-readable only (`chmod 600`); never in git |
-| GPG passphrase | Per-Tracker env var; passed to `gpg` subprocess via `os.pipe()` fd — invisible in `ps aux` |
-| Flask secret key | Generated at setup; stored in `pw.json.gpg` under `_wsadmin.notes` |
+| Credentials in config | `~/.MultiTaskWS/MultiTaskWS_config.json` is `chmod 600`; never in git |
+| GPG passphrase | Shared across Trackers; passed to `gpg` via `os.pipe()` — invisible in `ps aux` |
+| Flask secret key | Generated at setup; stored in platform config |
 | User passwords | SHA-256 hashed; plaintext never written to disk |
-| Cross-Tracker isolation | Separate user DBs, separate passphrases, separate Flask secret keys |
+| Cross-Tracker isolation | Separate user DBs, separate Flask secret keys |
 | User DB files | `**/Accts/*.gpg` excluded from git via `.gitignore` |
 
 ---
@@ -573,31 +509,26 @@ Add `**/Accts/*.gpg` to the Tracker's `.gitignore`.
 }
 ```
 
-The `_wsadmin` record stores the Flask secret key (written by
-`setupWebServerCmd.py`):
+The `wbgadminWS` record stores a config pointer:
 
 ```json
 {
-  "username":   "_wsadmin",
+  "username":   "wbgadminWS",
   "password":   "",
   "full_name":  "webserver admin",
-  "role":       "admin",
-  "notes":      "<64-char-hex-secret-key>",
+  "role":       "member",
+  "notes":      "/home/wbgroup/.MultiTaskWS/MultiTaskWS_config.json",
   "created_at": "..."
 }
 ```
 
-`multitrack.auth.ALLOWED_ROLES` defines the default valid role strings:
-`["member", "llcManager", "bookkeeper", "accountant"]`. Trackers may pass
-their own list via `make_auth_routes(allowed_roles=[...])`.
+`multitrack.auth.ALLOWED_ROLES` default: `["member", "llcManager", "bookkeeper", "accountant"]`.
 
 ---
 
 ## 9. Role Permissions
 
 > **Note:** Permission enforcement is a future implementation item.
-> The table defines the intended policy; no role-based restrictions
-> are currently active in `multitrack.auth`.
 
 | Role | Views | Fields | DB | Registration |
 |------|-------|--------|----|--------------|
@@ -605,9 +536,3 @@ their own list via `make_auth_routes(allowed_roles=[...])`.
 | `member` | View All | View Only | No Refresh | No access |
 | `bookkeeper` | View All | Edit | Session Only | No access |
 | `accountant` | View All | View Only | No Refresh | No access |
-| `_wsadmin` | View All | View Only | No Refresh | New, Delete, Edit |
-
-- **Views** — which pages/statements the role can access
-- **Fields** — read-only vs. editable transaction fields
-- **DB** — `Refresh` = can reload/new-session; `Session Only` = working-file edits only; `No Refresh` = read-only
-- **Registration** — ability to create/delete/edit accounts in `pw.json.gpg`
