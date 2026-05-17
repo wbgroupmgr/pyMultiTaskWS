@@ -56,7 +56,7 @@ class WsCmd:
     """
     AdminTracker tracker-level manager.
 
-    Reads MULTITRACK_GPG_PASSPHRASE and WEB_SECRET_KEY from env or
+    Reads APP_GPG_PASSPHRASE and WEB_SECRET_KEY from env or
     ~/.MultiTaskWS/MultiTaskWS_config.json (written by platform wsCmd.py --setup).
     """
 
@@ -135,7 +135,7 @@ class WsCmd:
 
         self._inject_env_from_platform()
 
-        if not os.environ.get("MULTITRACK_GPG_PASSPHRASE"):
+        if not os.environ.get("APP_GPG_PASSPHRASE"):
             print("  ✗ adminTracker stanza not found in platform config.")
             print(f"    Run: python3 wsCmd.py --setup  (from pyMultiTaskWS/)")
             sys.exit(1)
@@ -156,7 +156,7 @@ class WsCmd:
         """Start AdminTracker standalone (no dispatcher prefix, mount at /)."""
         self._inject_env_from_platform()
 
-        if not os.environ.get("MULTITRACK_GPG_PASSPHRASE"):
+        if not os.environ.get("APP_GPG_PASSPHRASE"):
             print("  ✗ adminTracker stanza not found in platform config.")
             print(f"    Run: python3 wsCmd.py --setup  (from pyMultiTaskWS/)")
             sys.exit(1)

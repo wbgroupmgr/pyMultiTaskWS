@@ -19,13 +19,13 @@ PythonAnywhere: wsgi.py imports make_application() — no CLI args needed.
 
 Config: ~/.MultiTaskWS/MultiTaskWS_config.json
   Top-level fields (stored for recovery; not used by any Tracker directly):
-    MULTITRACK_GPG_PASSPHRASE  — master passphrase; tracker passphrases derived from it
+    WEB_GPG_PASSPHRASE         — master passphrase; tracker passphrases derived from it
     WEB_SECRET_KEY             — platform-level key (not used by trackers)
     WebServer                  — 'Host_<pa-user>' or 'local_<machine>'
     Trackers                   — list of Tracker entries
 
   Per-tracker stanza (keyed by stanza_key, e.g. "adminTracker"):
-    MULTITRACK_GPG_PASSPHRASE  — derived as <top>_<stanza_key>
+    APP_GPG_PASSPHRASE         — derived as <top>_<stanza_key>
     WEB_SECRET_KEY             — tracker-specific random key
     (external trackers use their own env var names, e.g. LLC_GPG_PASSPHRASE)
 """
@@ -93,7 +93,7 @@ class WsCmd:
     Top-level keys store the master passphrase for recovery only.
     Each Tracker has its own stanza keyed by stanza_key:
       {
-        "MULTITRACK_GPG_PASSPHRASE": "<top>_<stanza_key>",
+        "APP_GPG_PASSPHRASE": "<top>_<stanza_key>",
         "WEB_SECRET_KEY": "<tracker-specific-random>"
       }
     External trackers use their own env var names (e.g. LLC_GPG_PASSPHRASE).
@@ -178,7 +178,7 @@ class WsCmd:
         Write platform config and generate per-tracker stanzas.
 
         Top-level fields store the master passphrase for recovery only.
-        Each builtin Tracker gets a stanza: { MULTITRACK_GPG_PASSPHRASE, WEB_SECRET_KEY }
+        Each builtin Tracker gets a stanza: { APP_GPG_PASSPHRASE, WEB_SECRET_KEY }
           passphrase = <top_passphrase>_<stanza_key>
           secret_key = new random hex (preserved across re-runs unless --reset)
         External trackers write their own stanza via their wsCmd.py --setup.
@@ -187,7 +187,7 @@ class WsCmd:
         cfg = self._load_config()
 
         # Top-level — stored for recovery; not injected into any Tracker.
-        cfg["MULTITRACK_GPG_PASSPHRASE"] = top_passphrase
+        cfg["WEB_GPG_PASSPHRASE"] = top_passphrase
         cfg["WEB_SECRET_KEY"]            = secrets.token_hex(32)
         cfg["WebServer"]                 = self._webserver_tag()
         cfg.setdefault("Trackers", list(_DEFAULT_TRACKERS))
@@ -200,10 +200,10 @@ class WsCmd:
             tracker_pp  = f"{top_passphrase}_{sk}"
             existing_sk = cfg.get(sk, {}).get("WEB_SECRET_KEY")
             cfg[sk] = {
-                "MULTITRACK_GPG_PASSPHRASE": tracker_pp,
+                "APP_GPG_PASSPHRASE": tracker_pp,
                 "WEB_SECRET_KEY":            existing_sk or secrets.token_hex(32),
             }
-            print(f"    [{sk}] MULTITRACK_GPG_PASSPHRASE : {'*' * len(tracker_pp)}")
+            print(f"    [{sk}] APP_GPG_PASSPHRASE         : {'*' * len(tracker_pp)}")
             print(f"    [{sk}] WEB_SECRET_KEY            : {cfg[sk]['WEB_SECRET_KEY'][:16]}…")
 
         self._save_config(cfg)
@@ -215,13 +215,13 @@ class WsCmd:
         print("\n── Step 4: AdminTracker User Database ──────────────────────────")
         cfg          = self._load_config()
         admin_stanza = cfg.get("adminTracker", {})
-        pp           = admin_stanza.get("MULTITRACK_GPG_PASSPHRASE", "")
+        pp           = admin_stanza.get("APP_GPG_PASSPHRASE", "")
         if not pp:
             print("  ✗ adminTracker stanza not found in config — run --setup again.")
             sys.exit(1)
 
         # Set env var so multitrack.auth GPG operations use the tracker passphrase.
-        os.environ["MULTITRACK_GPG_PASSPHRASE"] = pp
+        os.environ["APP_GPG_PASSPHRASE"] = pp
 
         _ADMIN_DB.parent.mkdir(parents=True, exist_ok=True)
         users = []
@@ -349,7 +349,7 @@ class WsCmd:
         print(f"  Config : {self.CONFIG_PATH}")
         print()
         print("  Recover master passphrase any time:")
-        print(f"    python3 -c \"import json; c=json.load(open('{self.CONFIG_PATH}')); print(c['MULTITRACK_GPG_PASSPHRASE'])\"")
+        print(f"    python3 -c \"import json; c=json.load(open('{self.CONFIG_PATH}')); print(c['WEB_GPG_PASSPHRASE'])\"")
         print()
         print("  Start locally (full WSGI dispatcher):")
         print("    python3 wsCmd.py --start")

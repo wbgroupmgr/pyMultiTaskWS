@@ -7,7 +7,7 @@ PA imports it via multitrack_wsgi.py. Hit Reload in the Web tab.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 LOCAL TESTING ONLY — standalone (no dispatcher, mounted at /):
-    export MULTITRACK_GPG_PASSPHRASE=test1234567890
+    export APP_GPG_PASSPHRASE=test1234567890
     python adminTracker/wsgi.py
     → http://127.0.0.1:8081/login  (webadmin / WebAdmin0!)
 
@@ -34,7 +34,7 @@ _DB_PATH = Path(__file__).resolve().parent / "Accts" / "pw.json.gpg"
 
 def _ensure_db():
     """Auto-seed default user on first run so no separate setup is needed."""
-    pp = os.environ.get("MULTITRACK_GPG_PASSPHRASE", "")
+    pp = os.environ.get("APP_GPG_PASSPHRASE", "")
     if not pp:
         return
     try:

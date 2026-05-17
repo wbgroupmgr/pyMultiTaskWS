@@ -25,14 +25,14 @@ Usage in a Tracker's wsgi.py or app factory
 
 Environment variables
 ─────────────────────
-  MULTITRACK_GPG_PASSPHRASE   — GPG symmetric passphrase for the user DB.
+  APP_GPG_PASSPHRASE          — GPG symmetric passphrase for the user DB.
                                  Can be overridden per-call via passphrase=.
   (No default — server will refuse to start DB operations if unset.)
 
 GPG encryption
 ──────────────
   Algorithm : AES-256 symmetric (no key-pair required)
-  Passphrase: MULTITRACK_GPG_PASSPHRASE env var
+  Passphrase: APP_GPG_PASSPHRASE env var
   CLI tool  : gpg (GnuPG 2.x must be on PATH)
   Strategy  : passphrase passed via os.pipe fd (not CLI args — invisible in ps)
   Write     : atomic encrypt → .tmp → rename over .gpg
@@ -67,7 +67,7 @@ from flask import (
 
 ALLOWED_ROLES: List[str] = ["member", "llcManager", "bookkeeper", "accountant"]
 
-_GPG_PASSPHRASE_ENV = "MULTITRACK_GPG_PASSPHRASE"
+_GPG_PASSPHRASE_ENV = "APP_GPG_PASSPHRASE"
 
 # Package-bundled templates (Tracker may override via its own template folder).
 _TMPL_DIR = Path(__file__).resolve().parent / "templates"
