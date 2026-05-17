@@ -64,14 +64,15 @@ class WsCmd:
         _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     def _inject_env_from_platform(self) -> None:
-        """Pull credentials from platform config if not already in env."""
+        """Load adminTracker credentials from its stanza in the platform config."""
         if not _PLATFORM_CONFIG.exists():
             return
         try:
-            cfg = json.loads(_PLATFORM_CONFIG.read_text(encoding="utf-8"))
-            for var in ("MULTITRACK_GPG_PASSPHRASE", "WEB_SECRET_KEY"):
-                if not os.environ.get(var) and cfg.get(var):
-                    os.environ[var] = cfg[var]
+            cfg    = json.loads(_PLATFORM_CONFIG.read_text(encoding="utf-8"))
+            stanza = cfg.get("adminTracker", {})
+            for env_key, env_val in stanza.items():
+                if not os.environ.get(env_key):
+                    os.environ[env_key] = env_val
         except Exception:
             pass
 
@@ -135,9 +136,8 @@ class WsCmd:
         self._inject_env_from_platform()
 
         if not os.environ.get("MULTITRACK_GPG_PASSPHRASE"):
-            print("  ✗ MULTITRACK_GPG_PASSPHRASE not set and platform config not found.")
+            print("  ✗ adminTracker stanza not found in platform config.")
             print(f"    Run: python3 wsCmd.py --setup  (from pyMultiTaskWS/)")
-            print(f"    or:  export MULTITRACK_GPG_PASSPHRASE=<passphrase>")
             sys.exit(1)
 
         if reset:
@@ -157,7 +157,7 @@ class WsCmd:
         self._inject_env_from_platform()
 
         if not os.environ.get("MULTITRACK_GPG_PASSPHRASE"):
-            print("  ✗ MULTITRACK_GPG_PASSPHRASE not set.")
+            print("  ✗ adminTracker stanza not found in platform config.")
             print(f"    Run: python3 wsCmd.py --setup  (from pyMultiTaskWS/)")
             sys.exit(1)
 

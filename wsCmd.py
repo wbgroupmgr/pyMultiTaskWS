@@ -17,7 +17,17 @@ Start in WSGI mode (full dispatcher, mirrors PA environment):
 
 PythonAnywhere: wsgi.py imports make_application() — no CLI args needed.
 
-Config stored in: ~/.MultiTaskWS/MultiTaskWS_config.json
+Config: ~/.MultiTaskWS/MultiTaskWS_config.json
+  Top-level fields (stored for recovery; not used by any Tracker directly):
+    MULTITRACK_GPG_PASSPHRASE  — master passphrase; tracker passphrases derived from it
+    WEB_SECRET_KEY             — platform-level key (not used by trackers)
+    WebServer                  — 'Host_<pa-user>' or 'local_<machine>'
+    Trackers                   — list of Tracker entries
+
+  Per-tracker stanza (keyed by stanza_key, e.g. "adminTracker"):
+    MULTITRACK_GPG_PASSPHRASE  — derived as <top>_<stanza_key>
+    WEB_SECRET_KEY             — tracker-specific random key
+    (external trackers use their own env var names, e.g. LLC_GPG_PASSPHRASE)
 """
 
 import argparse
@@ -55,6 +65,8 @@ _SEED_USER = {
     "created_at": "2026-01-01T00:00:00",
 }
 
+# stanza_key is the key under which this tracker's credentials are stored in the config.
+# Passphrase formula: <top_passphrase>_<stanza_key>
 _DEFAULT_TRACKERS = [
     {
         "name":        "AdminTracker",
@@ -63,8 +75,12 @@ _DEFAULT_TRACKERS = [
         "description": "Platform administration — user management & tracker index",
         "status":      "online",
         "builtin":     True,
+        "stanza_key":  "adminTracker",
     }
 ]
+
+# Keys stripped from Tracker entries before they are shown in the registry / home page.
+_INTERNAL_KEYS = {"builtin", "sys_path", "stanza_key"}
 
 
 # ── WsCmd class ───────────────────────────────────────────────────────────────
@@ -73,13 +89,14 @@ class WsCmd:
     """
     MultiTaskWS platform manager.
 
-    Config: ~/.MultiTaskWS/MultiTaskWS_config.json
-      MULTITRACK_GPG_PASSPHRASE  — GPG passphrase for all Tracker user DBs
-      WEB_SECRET_KEY             — Flask session signing key
-      WebServer                  — 'Host_<pa-user>' or 'local_<machine>'
-      Trackers                   — list of Tracker entries (see _DEFAULT_TRACKERS)
-        Each entry: name, mount, url, description, status, builtin (bool)
-        External trackers also: sys_path, env {KEY: VALUE, ...}
+    Config: ~/.MultiTaskWS/MultiTaskWS_config.json (chmod 600)
+    Top-level keys store the master passphrase for recovery only.
+    Each Tracker has its own stanza keyed by stanza_key:
+      {
+        "MULTITRACK_GPG_PASSPHRASE": "<top>_<stanza_key>",
+        "WEB_SECRET_KEY": "<tracker-specific-random>"
+      }
+    External trackers use their own env var names (e.g. LLC_GPG_PASSPHRASE).
     """
 
     CONFIG_DIR  = Path.home() / ".MultiTaskWS"
@@ -101,13 +118,6 @@ class WsCmd:
             json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         self.CONFIG_PATH.chmod(0o600)
-
-    def _inject_env(self) -> None:
-        """Set MULTITRACK_GPG_PASSPHRASE and WEB_SECRET_KEY from config if not in env."""
-        cfg = self._load_config()
-        for var in ("MULTITRACK_GPG_PASSPHRASE", "WEB_SECRET_KEY"):
-            if not os.environ.get(var) and cfg.get(var):
-                os.environ[var] = cfg[var]
 
     def _webserver_tag(self) -> str:
         home = Path.home()
@@ -137,11 +147,11 @@ class WsCmd:
             print(f"  ✓ Deleted {t.name}")
 
     def _prompt_passphrase(self) -> str:
-        print("\n── Step 1: GPG Passphrase ──────────────────────────────────────")
-        print("Used to encrypt every Tracker user DB (pw.json.gpg).")
-        print("Must be the same passphrase each time the server runs.\n")
+        print("\n── Step 1: Master GPG Passphrase ───────────────────────────────")
+        print("Each Tracker's passphrase is derived as <master>_<trackerName>.")
+        print("Only this master value is prompted — tracker values are generated.\n")
         while True:
-            pp = getpass.getpass("  Enter MULTITRACK_GPG_PASSPHRASE (min 12 chars): ").strip()
+            pp = getpass.getpass("  Enter master passphrase (min 12 chars): ").strip()
             if len(pp) < 12:
                 print("  ✗ Too short — at least 12 characters required.")
                 continue
@@ -149,7 +159,6 @@ class WsCmd:
                 print("  ✗ Passphrases do not match.")
                 continue
             break
-        os.environ["MULTITRACK_GPG_PASSPHRASE"] = pp
         print("  ✓ Passphrase accepted.")
         return pp
 
@@ -164,8 +173,56 @@ class WsCmd:
         else:
             print(f"  ✓ {', '.join(DEPS)} ready.")
 
+    def _write_config(self, top_passphrase: str) -> None:
+        """
+        Write platform config and generate per-tracker stanzas.
+
+        Top-level fields store the master passphrase for recovery only.
+        Each builtin Tracker gets a stanza: { MULTITRACK_GPG_PASSPHRASE, WEB_SECRET_KEY }
+          passphrase = <top_passphrase>_<stanza_key>
+          secret_key = new random hex (preserved across re-runs unless --reset)
+        External trackers write their own stanza via their wsCmd.py --setup.
+        """
+        print("\n── Step 3: Write Platform Config ───────────────────────────────")
+        cfg = self._load_config()
+
+        # Top-level — stored for recovery; not injected into any Tracker.
+        cfg["MULTITRACK_GPG_PASSPHRASE"] = top_passphrase
+        cfg["WEB_SECRET_KEY"]            = secrets.token_hex(32)
+        cfg["WebServer"]                 = self._webserver_tag()
+        cfg.setdefault("Trackers", list(_DEFAULT_TRACKERS))
+
+        # Generate stanzas for builtin Trackers.
+        for t in cfg["Trackers"]:
+            if not t.get("builtin"):
+                continue
+            sk          = t["stanza_key"]
+            tracker_pp  = f"{top_passphrase}_{sk}"
+            existing_sk = cfg.get(sk, {}).get("WEB_SECRET_KEY")
+            cfg[sk] = {
+                "MULTITRACK_GPG_PASSPHRASE": tracker_pp,
+                "WEB_SECRET_KEY":            existing_sk or secrets.token_hex(32),
+            }
+            print(f"    [{sk}] MULTITRACK_GPG_PASSPHRASE : {'*' * len(tracker_pp)}")
+            print(f"    [{sk}] WEB_SECRET_KEY            : {cfg[sk]['WEB_SECRET_KEY'][:16]}…")
+
+        self._save_config(cfg)
+        print(f"  ✓ Saved → {self.CONFIG_PATH}  (chmod 600)")
+        print(f"    WebServer : {cfg['WebServer']}")
+
     def _seed_admin_db(self) -> None:
-        print("\n── Step 3: AdminTracker User Database ──────────────────────────")
+        """Seed adminTracker/Accts/pw.json.gpg using the adminTracker stanza passphrase."""
+        print("\n── Step 4: AdminTracker User Database ──────────────────────────")
+        cfg          = self._load_config()
+        admin_stanza = cfg.get("adminTracker", {})
+        pp           = admin_stanza.get("MULTITRACK_GPG_PASSPHRASE", "")
+        if not pp:
+            print("  ✗ adminTracker stanza not found in config — run --setup again.")
+            sys.exit(1)
+
+        # Set env var so multitrack.auth GPG operations use the tracker passphrase.
+        os.environ["MULTITRACK_GPG_PASSPHRASE"] = pp
+
         _ADMIN_DB.parent.mkdir(parents=True, exist_ok=True)
         users = []
         if _ADMIN_DB.exists():
@@ -184,7 +241,7 @@ class WsCmd:
 
         admin = find_user(users, _ADMIN_ID)
         if admin:
-            admin["notes"] = f"Config in {self.CONFIG_PATH}"
+            admin["notes"] = f"Config stanza: adminTracker in {self.CONFIG_PATH}"
             print(f"  Updated {_ADMIN_ID} notes.")
         else:
             users.append({
@@ -193,7 +250,7 @@ class WsCmd:
                 "full_name":  "webserver admin",
                 "phone":      "",
                 "role":       "member",
-                "notes":      f"Config in {self.CONFIG_PATH}",
+                "notes":      f"Config stanza: adminTracker in {self.CONFIG_PATH}",
                 "created_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
             })
             print(f"  + Created {_ADMIN_ID} record.")
@@ -201,60 +258,55 @@ class WsCmd:
         save_users(_ADMIN_DB, users)
         print(f"  ✓ Saved → {_ADMIN_DB}")
 
-    def _write_config(self, passphrase: str, secret_key: str) -> None:
-        print("\n── Step 4: Write Platform Config ───────────────────────────────")
-        cfg = self._load_config()
-        cfg["MULTITRACK_GPG_PASSPHRASE"] = passphrase
-        cfg["WEB_SECRET_KEY"]            = secret_key
-        cfg["WebServer"]                 = self._webserver_tag()
-        cfg.setdefault("Trackers", _DEFAULT_TRACKERS)
-        self._save_config(cfg)
-        print(f"  ✓ Saved → {self.CONFIG_PATH}")
-        print(f"    MULTITRACK_GPG_PASSPHRASE : {'*' * len(passphrase)}")
-        print(f"    WEB_SECRET_KEY            : {secret_key[:16]}…")
-        print(f"    WebServer                 : {cfg['WebServer']}")
-
-    # ── application builder (used by wsgi.py and --start --wsgi) ─────────────
+    # ── application builder ───────────────────────────────────────────────────
 
     def make_application(self):
         """
         Build and return the WSGI DispatcherMiddleware application.
 
-        Called by wsgi.py (PA entry point) and by --start --wsgi locally.
-        Loads config, sets env vars, populates tracker registry, imports
-        each Tracker's wsgi.py, and returns the fully wired application.
+        For each Tracker in config["Trackers"]:
+          1. Read config[stanza_key] → set env vars (tracker-specific credentials).
+          2. For builtin Trackers: import directly.
+          3. For external Trackers: add sys_path, load wsgi.py via importlib.
+        Returns the fully wired DispatcherMiddleware.
         """
-        self._inject_env()
         cfg      = self._load_config()
         trackers = cfg.get("Trackers", _DEFAULT_TRACKERS)
 
-        # Strip internal-only keys before injecting into registry.
+        # Registry: strip internal-only keys before the home page sees them.
         import adminTracker.registry as _reg
         _reg.TRACKERS = [
-            {k: v for k, v in t.items() if k not in ("builtin", "sys_path", "env")}
+            {k: v for k, v in t.items() if k not in _INTERNAL_KEYS}
             for t in trackers
         ]
 
-        # AdminTracker is always built-in.
+        # adminTracker — inject its stanza env vars, then import.
+        for env_key, env_val in cfg.get("adminTracker", {}).items():
+            os.environ[env_key] = env_val
+
         from adminTracker.wsgi import application as admin_app
         mounts = {"/admin": admin_app}
 
-        # External Trackers — each entry needs sys_path and optionally env.
+        # External Trackers — stanza provides env vars; Tracker entry provides sys_path.
         for t in trackers:
             if t.get("builtin"):
                 continue
-            sys_path = t.get("sys_path", "")
+            stanza_key = t.get("stanza_key", t["mount"].strip("/"))
+            for env_key, env_val in cfg.get(stanza_key, {}).items():
+                os.environ[env_key] = env_val
+
+            sys_path  = t.get("sys_path", "")
+            wsgi_file = Path(sys_path) / "wsgi.py" if sys_path else None
+
             if sys_path and sys_path not in sys.path:
                 sys.path.insert(0, sys_path)
-            for env_key, env_val in t.get("env", {}).items():
-                os.environ.setdefault(env_key, env_val)
-            wsgi_file = Path(sys_path) / "wsgi.py" if sys_path else None
+
             if not wsgi_file or not wsgi_file.exists():
                 print(f"  ✗ {t['name']}: wsgi.py not found at {wsgi_file}")
                 continue
             try:
                 spec = importlib.util.spec_from_file_location(
-                    f"tracker_{t['mount'].strip('/')}_wsgi", str(wsgi_file)
+                    f"tracker_{stanza_key}_wsgi", str(wsgi_file)
                 )
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
@@ -270,7 +322,14 @@ class WsCmd:
     # ── public commands ───────────────────────────────────────────────────────
 
     def setup(self, reset: bool = False) -> None:
-        """Interactive platform setup — writes ~/.MultiTaskWS/MultiTaskWS_config.json."""
+        """
+        Interactive platform setup — writes ~/.MultiTaskWS/MultiTaskWS_config.json.
+
+        Step 1: Prompt master passphrase.
+        Step 2: Install Flask + Werkzeug.
+        Step 3: Write config — derive per-tracker stanzas (<top>_<stanza_key>).
+        Step 4: Seed adminTracker user DB using its stanza passphrase.
+        """
         print()
         print("=" * 64)
         print("  MultiTaskWS — Platform Setup")
@@ -279,20 +338,18 @@ class WsCmd:
         if reset:
             self._reset_config()
 
-        passphrase = self._prompt_passphrase()
+        top_passphrase = self._prompt_passphrase()
         self._install_deps()
-        self._seed_admin_db()
-        secret_key = secrets.token_hex(32)
-        os.environ["WEB_SECRET_KEY"] = secret_key
-        self._write_config(passphrase, secret_key)
+        self._write_config(top_passphrase)   # must run before _seed_admin_db
+        self._seed_admin_db()                # reads adminTracker stanza from config
 
         print()
         print("=" * 64)
         print("  Setup complete.")
         print(f"  Config : {self.CONFIG_PATH}")
         print()
-        print("  Recover credentials any time:")
-        print(f"    python3 -c \"import json; cfg=json.load(open('{self.CONFIG_PATH}')); print(cfg['MULTITRACK_GPG_PASSPHRASE'])\"")
+        print("  Recover master passphrase any time:")
+        print(f"    python3 -c \"import json; c=json.load(open('{self.CONFIG_PATH}')); print(c['MULTITRACK_GPG_PASSPHRASE'])\"")
         print()
         print("  Start locally (full WSGI dispatcher):")
         print("    python3 wsCmd.py --start")
@@ -308,24 +365,17 @@ class WsCmd:
               addr: str = "127.0.0.1", port: int = None,
               debug: bool = False) -> None:
         """
-        Start the MultiTaskWS dispatcher.
+        Start the full WSGI dispatcher.
 
-        --start (default / --local):
-            Full WSGI dispatcher via Werkzeug dev server on port 8080.
-            Same behavior as the old `python multitrack_wsgi.py`.
-
-        --start --wsgi:
-            Same full dispatcher, but runs with reloader off (closer to PA behavior).
-            Useful for smoke-testing the production-like WSGI stack locally.
+        --start (default / --local): Werkzeug dev server, port 8080.
+        --start --wsgi: same dispatcher, no reloader (mirrors PA behavior).
         """
         _port = port or 8080
 
         print()
         print("=" * 64)
-        if wsgi_mode:
-            print(f"  MultiTaskWS — WSGI Start  (http://{addr}:{_port})")
-        else:
-            print(f"  MultiTaskWS — Local Start  (http://{addr}:{_port})")
+        label = "WSGI Start" if wsgi_mode else "Local Start"
+        print(f"  MultiTaskWS — {label}  (http://{addr}:{_port})")
         print("=" * 64)
 
         application = self.make_application()
@@ -337,7 +387,7 @@ class WsCmd:
 
         print()
         if wsgi_mode:
-            print("  [WSGI mode] Running without reloader or debugger.")
+            print("  [WSGI mode] No reloader or debugger.")
         else:
             print(f"  Visit: http://127.0.0.1:{_port}/admin/login  (webadmin / WebAdmin0!)")
 
@@ -372,13 +422,10 @@ examples:
     mode.add_argument("--start", action="store_true",
                       help="Start the full WSGI dispatcher")
 
-    # --setup options
     ap.add_argument("--reset", action="store_true",
                     help="[--setup] Delete config + adminTracker DB before setup")
-
-    # --start options
     ap.add_argument("--local", action="store_true",
-                    help="[--start] Local Werkzeug dev server (default, implied by --start)")
+                    help="[--start] Local Werkzeug dev server (default)")
     ap.add_argument("--wsgi", action="store_true",
                     help="[--start] WSGI mode: no reloader/debugger (mirrors PA stack)")
     ap.add_argument("--addr", default="127.0.0.1", metavar="IP",
