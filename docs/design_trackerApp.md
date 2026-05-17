@@ -8,7 +8,16 @@
 
 ## 1. What Is a Tracker?
 
-A **Tracker** is a self-contained Flask web application mounted at a URL prefix
+A **Tracker** is a web application whose code is typically found in a GitHub repo. 
+
+- it can run stand alone as its own web server, or
+- it can run as a web app within the **MultiTaskWS** web server.
+
+This document describes a tracker app running within a **MultiTaskWS** web server. 
+
+### 1.1. MultiTaskWS Web Application
+
+A **tracker App** is a self-contained Flask web application mounted at a URL prefix
 (`/<trackerid>/`) by the MultiTrack dispatcher. Each Tracker:
 
 - Has its own git repo, codebase, and dependencies
@@ -22,11 +31,22 @@ The platform injects the tracker's credentials as env vars, adds its root to
 **adminTracker** (built into `pyMultiTaskWS`) is the reference implementation.
 Every pattern in this guide is demonstrated there.
 
+### 1.2 Domain Name
+
+The default domain of a tracker is of the form:
+
+- <paDomainID>.pythonanywhere.com/<trackerid>
+- where: <paDomainID> is the PA User ID of the PA Web App. 
+
+A custom domain can be set up per tracker such that user could use: 
+
+- <trackerid>.com
+
 ---
 
-## 2. Tracker Repo Contract — Required at a Glance
+## 2. Tracker App Repo Contract — Required at a Glance
 
-The platform cares about exactly four things in a tracker repo:
+The platform cares about exactly four things in a tracker app repo:
 
 | Artifact | Location (relative to `sys_path`) | Purpose |
 |---|---|---|
@@ -35,7 +55,7 @@ The platform cares about exactly four things in a tracker repo:
 | `Accts/pw.json.gpg` | `<sys_path>/Accts/` | GPG-encrypted user DB — gitignored, created by `--setup` |
 | Stanza in platform config | `~/.MultiTaskWS/MultiTaskWS_config.json` | Tracker credentials injected as env vars before `wsgi.py` is imported |
 
-Everything else (views, data models, templates, static files) is internal to the tracker.
+Everything else (views, data models, templates, static files) is internal to the tracker app.
 
 **Platform integration checklist:**
 
@@ -48,11 +68,11 @@ Everything else (views, data models, templates, static files) is internal to the
 
 ---
 
-## 3. Tracker Developer Guidelines
+## 3. Tracker App Developer Guidelines
 
 ### 3.1 Required: `wsgi.py` Entry Point
 
-Every Tracker exposes a `wsgi.py` at its `sys.path` root that exposes `application`.
+Every Tracker App exposes a `wsgi.py` at its `sys.path` root that exposes `application`.
 
 ```python
 import sys
@@ -69,9 +89,9 @@ See `adminTracker/app.py` for the complete reference pattern.
 
 ---
 
-### 3.2 Required: `wsCmd.py` Per Tracker
+### 3.2 Required: `wsCmd.py` Per Tracker App
 
-Every Tracker has `wsCmd.py` with `--setup` (DB reseed) and `--start` (standalone).
+Every Tracker App has `wsCmd.py` with `--setup` (DB reseed) and `--start` (standalone).
 `--setup` reads the tracker's own stanza from `~/.MultiTaskWS/MultiTaskWS_config.json`
 and does **not** prompt for a passphrase — the platform `wsCmd.py --setup` handles that.
 
@@ -120,10 +140,10 @@ make_auth_routes(self.app, db_path=Path("Accts/pw.json.gpg"), tracker_name="My T
 
 ### 3.5 Required: Isolated User DB
 
-Each Tracker stores `Accts/pw.json.gpg` within its own repo.
+Each Tracker App stores `Accts/pw.json.gpg` within its own repo.
 Add `**/Accts/*.gpg` to `.gitignore` — the DB is never committed.
 
-The DB is created by `wsCmd.py --setup` using the tracker's own `APP_GPG_PASSPHRASE`
+The DB is created by `wsCmd.py --setup` using the tracker app's own `APP_GPG_PASSPHRASE`
 (or tracker-specific equivalent). The platform derives this as `<master>_<stanza_key>`.
 
 ---
@@ -159,27 +179,27 @@ containing `wsgi.py` and `wsCmd.py` (the repo root shown above).
 
 ---
 
-## 4. PythonAnywhere Integration — Adding & Updating Trackers
+## 4. PythonAnywhere Integration — Adding & Updating Tracker Apps
 
 > **Prerequisite**: platform is already deployed (see [design_webserver.md §4](design_webserver.md)).
-> Tracker repo must satisfy the contract in §2 above.
+> Tracker App repo must satisfy the contract in §2 above.
 
-### 4.1 Adding an External Tracker
+### 4.1 Adding an External Tracker App
 
-**Step 1 — Clone the tracker repo on PA**
+**Step 1 — Clone the tracker app repo on PA**
 
 ```bash
 mkdir -p ~/<trackerid> && cd ~/<trackerid>
 git clone <tracker-repo-url>
 ```
 
-**Step 2 — Install the tracker's dependencies**
+**Step 2 — Install the tracker app's dependencies**
 
 ```bash
 pip3.10 install --user <tracker-specific-packages>
 ```
 
-**Step 3 — Run the tracker's own setup**
+**Step 3 — Run the tracker app's own setup**
 
 ```bash
 cd ~/<trackerid>/<repo>/<tracker-sys-path-root>
@@ -189,9 +209,9 @@ python3.10 wsCmd.py --setup
 This seeds `Accts/pw.json.gpg` and writes the tracker stanza to
 `~/.MultiTaskWS/MultiTaskWS_config.json`.
 
-**Step 4 — Register the tracker in the platform config**
+**Step 4 — Register the tracker app in the platform config**
 
-Add a Tracker entry to the `"Trackers"` list in
+Add a Tracker App entry to the `"Trackers"` list in
 `~/.MultiTaskWS/MultiTaskWS_config.json`:
 
 ```json
@@ -201,37 +221,39 @@ Add a Tracker entry to the `"Trackers"` list in
   "url":         "/<trackerid>/login",
   "description": "<one-line description>",
   "status":      "online",
-  "sys_path":    "/home/wbgroup/<trackerid>/<repo>/<root>",
+  "sys_path":    "/home/trackerid/<trackerid>/<repo>/<root>",
   "stanza_key":  "<trackerid>"
 }
 ```
 
 **Step 5 — PA Web tab → Reload**
 
-Visit `https://wbgroup.pythonanywhere.com/<trackerid>/login`.
+Visit `https://paDomain.com/<trackerid>/login`.
 
 ---
 
 #### Worked example: PropRental Tracker
 
+- for this example <trackerid> = 'llcTracker'
+
 ```bash
 # Step 1 — clone
-mkdir -p ~/llc && cd ~/llc
-git clone https://github.com/wbgroupmgr/LLC-WB-Group.git
+mkdir -p ~/llcTracker && cd ~/llcTracker
+git clone https://github.com/myLLC_GitID/myLLC.git
 
 # Step 2 — dependencies
 pip3.10 install --user flask pandas numpy pypdf werkzeug deepdiff
 
 # Step 3 — tracker setup
-cd ~/llc/LLC-WB-Group/pages/AccountingData/Notebooks
+cd ~/llcTracker/myLLC/pages/AccountingData/Notebooks
 python3.10 wsCmd.py --setup
 
 # Step 4 — add to MultiTaskWS_config.json "Trackers" list:
 # {
-#   "name": "PropRental Tracker", "mount": "/llc", "url": "/llc/login",
+#   "name": "PropRental Tracker", "mount": "/llcTracker", "url": "/llcTracker/login",
 #   "description": "W&B Group LLC — double-entry ledger & IRS forms",
 #   "status": "online",
-#   "sys_path": "/home/wbgroup/llc/LLC-WB-Group/pages/AccountingData/Notebooks",
+#   "sys_path": "/home/trackerid/llcTracker/myLLC/pages/AccountingData/Notebooks",
 #   "stanza_key": "llc"
 # }
 # (tracker's wsCmd.py --setup will have written the "llc" stanza)
@@ -239,7 +261,7 @@ python3.10 wsCmd.py --setup
 # Step 5 — PA Web tab → Reload
 ```
 
-After reload, visit `https://wbgroup.pythonanywhere.com/llc/login`.
+After reload, visit `https://paDomain.com/llcTracker/login`.
 
 ---
 
@@ -257,17 +279,17 @@ git pull origin main
 
 | File | Scope | Purpose |
 |------|-------|---------|
-| `<tracker>/wsgi.py` | Tracker | WSGI entry point; exposes `application` |
-| `<tracker>/wsCmd.py` | Tracker | Tracker CLI — `--setup` (DB seed + stanza) and `--start` (standalone) |
-| `<tracker>/Accts/pw.json.gpg` | Tracker | Encrypted user DB (gitignored) |
-| `<tracker>/app.py` | Tracker | Flask app class — calls `make_auth_routes`, defines views |
-| `<tracker>/templates/` | Tracker | Jinja2 templates — must use `url_for()` throughout |
+| `<trackerid>/wsgi.py` | Tracker | WSGI entry point; exposes `application` |
+| `<trackerid>/wsCmd.py` | Tracker | Tracker CLI — `--setup` (DB seed + stanza) and `--start` (standalone) |
+| `<trackerid>/Accts/pw.json.gpg` | Tracker | Encrypted user DB (gitignored) |
+| `<trackerid>/app.py` | Tracker | Flask app class — calls `make_auth_routes`, defines views |
+| `<trackerid>/templates/` | Tracker | Jinja2 templates — must use `url_for()` throughout |
 
 > For platform-side key files, see [design_webserver.md §5](design_webserver.md).
 
 ---
 
-## 6. User DB Schema
+## 6. adminTracker User DB Schema
 
 `Accts/pw.json.gpg` decrypts to a JSON array. Standard user record:
 
@@ -290,7 +312,7 @@ The `wbgadminWS` admin record stores a config pointer in `notes`:
   "password":   "",
   "full_name":  "webserver admin",
   "role":       "member",
-  "notes":      "/home/wbgroup/.MultiTaskWS/MultiTaskWS_config.json",
+  "notes":      "/home/trackerid/.MultiTaskWS/MultiTaskWS_config.json",
   "created_at": "..."
 }
 ```
@@ -303,9 +325,4 @@ The `wbgadminWS` admin record stores a config pointer in `notes`:
 
 > **Note:** Permission enforcement is a future implementation item.
 
-| Role | Views | Fields | DB | Registration |
-|------|-------|--------|----|--------------|
-| `llcManager` | View All | All | Refresh | New, Delete, Edit |
-| `member` | View All | View Only | No Refresh | No access |
-| `bookkeeper` | View All | Edit | Session Only | No access |
-| `accountant` | View All | View Only | No Refresh | No access |
+Refer to each tracker for details. 
