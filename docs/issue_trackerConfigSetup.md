@@ -10,7 +10,7 @@ Full multi-layer architecture assessment covering `pyMultiTaskWS`, `llcRentalTra
 - Consistent and elegant above all
 - `adminTracker` and `llcRentalTracker` follow the same config/setup pattern
 - `adminTracker` gets its own `~/.adminTracker/config.json`
-- Platform config renamed to `~/.MultiTask/config.json`
+- Platform config renamed to `~/.MultiTaskWS/config.json`
 - No tracker references internals outside its own codebase / `~/<tracker>/config.json`
 - No shortcuts — strict OO discipline, reuse
 
@@ -134,7 +134,7 @@ of the `rentalTracker` platform stanza:
 
 | Mode | Secret source |
 |---|---|
-| Running under MultiTaskWS | `~/.MultiTask/config.json` → `rentalTracker:` stanza, injected as env vars |
+| Running under MultiTaskWS | `~/.MultiTaskWS/config.json` → `rentalTracker:` stanza, injected as env vars |
 | Standalone (`wsCmd.py --start`) | `~/.llcRentalTracker/config.json` → `secrets:` block |
 
 Same values, two access paths. The `secrets:` block is not a flaw — it must exist for
@@ -145,7 +145,7 @@ which is going away).
 
 ```
 Tier 1: os.environ already set (operator / PA env tab)               ← highest
-Tier 2: ~/.MultiTask/config.json   rentalTracker: stanza             ← platform mode
+Tier 2: ~/.MultiTaskWS/config.json   rentalTracker: stanza             ← platform mode
 Tier 3: ~/.llcRentalTracker/config.json  secrets: block              ← standalone fallback
 ```
 
@@ -175,11 +175,11 @@ mkdir ~/pyMultiTask && cd ~/pyMultiTask
 git clone https://github.com/wbgroupmgr/pyMultiTaskWS.git
 cd pyMultiTaskWS
 
-# Bootstrap platform — creates ~/.MultiTask/config.json
+# Bootstrap platform — creates ~/.MultiTaskWS/config.json
 # Generates WEB_SECRET_KEY; registers platform Trackers list
 python3 wsCmd.py --setup
 # → prompts: Enter platform WEB_SECRET_KEY (or auto-generate?)
-# → writes ~/.MultiTask/config.json:
+# → writes ~/.MultiTaskWS/config.json:
 #     { WEB_SECRET_KEY, Trackers: [] }
 
 # Point PA WSGI file to:  /home/<user>/pyMultiTask/pyMultiTaskWS/wsgi.py
@@ -187,7 +187,7 @@ python3 wsCmd.py --setup
 ```\
 **State after Step 1**
 ```
-~/.MultiTask/config.json
+~/.MultiTaskWS/config.json
   WEB_SECRET_KEY: "<generated>"
   Trackers: []
 ```
@@ -202,7 +202,7 @@ cd ~/pyMultiTask/pyMultiTaskWS
 python3 adminTracker/wsCmd.py --setup
 # → generates unique APP_GPG_PASSPHRASE (distinct from all other trackers)
 # → generates unique WEB_SECRET_KEY for adminTracker
-# → writes adminTracker stanza to ~/.MultiTask/config.json
+# → writes adminTracker stanza to ~/.MultiTaskWS/config.json
 # → creates ~/.adminTracker/config.json
 # → creates adminTracker/Accts/pw.json.gpg  (seed user: admin / change immediately)
 # → registers adminTracker in Trackers list
@@ -210,7 +210,7 @@ python3 adminTracker/wsCmd.py --setup
 
 **State after Step 2**
 ```
-~/.MultiTask/config.json
+~/.MultiTaskWS/config.json
   WEB_SECRET_KEY: "<platform key>"
   Trackers: [ { name: AdminTracker, stanza_key: adminTracker, ... } ]
   adminTracker: {
@@ -265,10 +265,10 @@ python3 wsCmd.py --newBus ~/llc/LLC-WBGroup --year 2025 --llcName WBGroupLLC
 python3 wsCmd.py --setup --llcName WBGroupLLC
 # → reads LLC_GPG_PASSPHRASE from ~/.llcRentalTracker/config.json secrets:
 # → generates LLC_SECRET_KEY
-# → writes rentalTracker stanza to ~/.MultiTask/config.json:
+# → writes rentalTracker stanza to ~/.MultiTaskWS/config.json:
 #     rentalTracker: { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }
 # → writes LLC_SECRET_KEY back to ~/.llcRentalTracker/config.json secrets:
-# → registers rentalTracker in Trackers list in ~/.MultiTask/config.json
+# → registers rentalTracker in Trackers list in ~/.MultiTaskWS/config.json
 # → creates BUS/books/Accts/pw.json.gpg  (seed user: llcgroupmgr / change immediately)
 # → prints: "Push pw.json.gpg to BUS repo now (PA = master host)"
 
@@ -282,7 +282,7 @@ cd ~/pyTrackers/llcRentalTracker
 
 **State after Step 4b**
 ```
-~/.MultiTask/config.json
+~/.MultiTaskWS/config.json
   WEB_SECRET_KEY: "<platform key>"
   Trackers: [ adminTracker, rentalTracker ]
   adminTracker:   { APP_GPG_PASSPHRASE, WEB_SECRET_KEY }
@@ -331,7 +331,7 @@ python3 wsCmd.py --newBus /path/to/LLC-WBGroup --year 2025 --llcName WBGroupLLC
 
 python3 wsCmd.py --setup --llcName WBGroupLLC
 # → writes secrets: block to ~/.llcRentalTracker/config.json
-# → does NOT write platform stanza (no ~/.MultiTask/ needed locally)
+# → does NOT write platform stanza (no ~/.MultiTaskWS/ needed locally)
 # → does NOT create pw.json.gpg (pull it from BUS repo instead)
 
 # Pull pw.json.gpg from PA-committed BUS repo
@@ -401,7 +401,7 @@ cd ~/pyTrackers/llcRentalTracker
 python3 wsCmd.py --rotate-keys --llcName WBGroupLLC
 # → prompts: Enter new LLC_GPG_PASSPHRASE
 # → re-encrypts BUS/books/Accts/pw.json.gpg with new passphrase
-# → updates rentalTracker stanza in ~/.MultiTask/config.json
+# → updates rentalTracker stanza in ~/.MultiTaskWS/config.json
 # → updates secrets: in ~/.llcRentalTracker/config.json
 
 # Push rotated pw.json.gpg
@@ -419,12 +419,12 @@ python3 wsCmd.py --setup --llcName WBGroupLLC   # enter new passphrase when prom
 
 | What | Where | Name |
 |---|---|---|
-| GPG passphrase (platform-wide) | `~/.MultiTask/config.json` | `WEB_GPG_PASSPHRASE` |
+| GPG passphrase (platform-wide) | `~/.MultiTaskWS/config.json` | `WEB_GPG_PASSPHRASE` |
 | GPG passphrase (rentalTracker) | env var + stanza | `LLC_GPG_PASSPHRASE` |
-| GPG passphrase (adminTracker) | `~/.MultiTask/config.json` adminTracker stanza | `APP_GPG_PASSPHRASE` |
-| Flask secret (platform) | `~/.MultiTask/config.json` | `WEB_SECRET_KEY` |
+| GPG passphrase (adminTracker) | `~/.MultiTaskWS/config.json` adminTracker stanza | `APP_GPG_PASSPHRASE` |
+| Flask secret (platform) | `~/.MultiTaskWS/config.json` | `WEB_SECRET_KEY` |
 | Flask secret (rentalTracker) | env var + stanza | `LLC_SECRET_KEY` |
-| Flask secret (adminTracker stanza) | `~/.MultiTask/config.json` | `WEB_SECRET_KEY` |
+| Flask secret (adminTracker stanza) | `~/.MultiTaskWS/config.json` | `WEB_SECRET_KEY` |
 
 Per `design_trackerApp.md §3.2`, the convention is `<TRACKER>_GPG_PASSPHRASE` /
 `<TRACKER>_SECRET_KEY` where `<TRACKER>` matches the tracker slug (§3.6: short lowercase).
@@ -434,7 +434,7 @@ Recommendation: formalize `llc` as the rentalTracker slug → `LLC_GPG_PASSPHRAS
 ### Design Flaw 5 — Platform config path naming
 
 - Current: `~/.MultiTaskWS/MultiTaskWS_config.json`
-- Required: `~/.MultiTask/config.json`
+- Required: `~/.MultiTaskWS/config.json`
 
 All code references must be updated across `pyMultiTaskWS`, `llcRentalTracker`, and
 `adminTracker`.
@@ -451,7 +451,7 @@ convention should exist explicitly.
 ## Target Architecture
 
 ```
-~/.MultiTask/config.json                       ← RENAMED from ~/.MultiTaskWS/MultiTaskWS_config.json
+~/.MultiTaskWS/config.json                       ← RENAMED from ~/.MultiTaskWS/MultiTaskWS_config.json
   WEB_SECRET_KEY                               platform Flask signing key
   Trackers: [...]                              registered tracker list
   adminTracker: {                              built-in tracker stanza
@@ -483,12 +483,12 @@ LLC-WBGroup repo (BUS data):
 ### Phase 2 — Config & Contract Alignment
 
 **2a — Rename platform config path** (`pyMultiTaskWS`)
-- Rename `~/.MultiTaskWS/` → `~/.MultiTask/`; `MultiTaskWS_config.json` → `config.json`
+- Rename `~/.MultiTaskWS/MultiTaskWS_config.json` → `~/.MultiTaskWS/config.json` (file rename only; directory stays)
 - Update all references in `pyMultiTaskWS`, `llcRentalTracker`, `adminTracker`
 - Update `wsgi.py _inject_secrets()` Tier 3 path
 
 **2b — Write `rentalTracker` stanza in `wsCmd.py --setup`** (`llcRentalTracker`)
-- `wsCmd.py --setup` writes `rentalTracker: { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }` to `~/.MultiTask/config.json`
+- `wsCmd.py --setup` writes `rentalTracker: { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }` to `~/.MultiTaskWS/config.json`
 - `wsCmd.py --setup` writes same values to `~/.llcRentalTracker/config.json` `secrets:` block (standalone fallback)
 - Remove code that writes secrets to `llcProfile_*.json`
 - Remove `write_secrets()` from `setup_paths.py`; remove `SECRETS` global
@@ -517,7 +517,7 @@ LLC-WBGroup repo (BUS data):
 Replace multi-tier fallback with the documented three-tier priority chain:
 ```python
 # Tier 1: os.environ (already set by operator / PA env tab) — setdefault handles this
-# Tier 2: ~/.MultiTask/config.json  rentalTracker: stanza
+# Tier 2: ~/.MultiTaskWS/config.json  rentalTracker: stanza
 stanza = load_tracker_stanza("rentalTracker")   # from pyMultiTaskWS platform lib
 os.environ.setdefault("LLC_GPG_PASSPHRASE", stanza.get("LLC_GPG_PASSPHRASE", ""))
 os.environ.setdefault("LLC_SECRET_KEY",     stanza.get("LLC_SECRET_KEY", ""))
@@ -734,12 +734,11 @@ cd ~/pyTrackers/llcRentalTracker
 git pull
 ```
 
-**PA + Local: Step 7 — Rename platform config directory**
+**PA + Local: Step 7 — Rename platform config file**
 
 ```bash
-# PA (and local if MultiTaskWS is installed):
-mv ~/.MultiTaskWS ~/.MultiTask
-mv ~/.MultiTask/MultiTaskWS_config.json ~/.MultiTask/config.json
+# Rename file only — directory stays ~/.MultiTaskWS/
+mv ~/.MultiTaskWS/MultiTaskWS_config.json ~/.MultiTaskWS/config.json
 ```
 
 **PA: Step 8 — Run `wsCmd.py --setup` to verify and formalize**
@@ -749,7 +748,7 @@ cd ~/pyTrackers/llcRentalTracker
 python3 wsCmd.py --setup --llcName WBGroupLLC
 # With Phase 2 code:
 # → reads secrets from ~/.llcRentalTracker/config.json secrets: (already set in Gate 1)
-# → writes rentalTracker stanza to ~/.MultiTask/config.json   (formalizes it)
+# → writes rentalTracker stanza to ~/.MultiTaskWS/config.json   (formalizes it)
 # → verifies pw.json.gpg decrypts correctly
 # → prints "✓ Configuration verified"
 ```
@@ -764,7 +763,7 @@ Expected startup log after Phase 2:
 ```
 startup: llc=WBGroupLLC year=2025 secret_key_src=env gpg_passphrase=set
 ```
-(Tier 2 from `~/.MultiTask/config.json` `rentalTracker:` stanza — no more Tier 3 fallback needed)
+(Tier 2 from `~/.MultiTaskWS/config.json` `rentalTracker:` stanza — no more Tier 3 fallback needed)
 
 ---
 
@@ -774,12 +773,12 @@ After all steps complete, verify on PA:
 
 ```bash
 # 1. Platform config in correct location
-ls ~/.MultiTask/config.json                                       # ✓ exists
+ls ~/.MultiTaskWS/config.json                                       # ✓ exists
 
 # 2. rentalTracker stanza present
 python3 -c "
 import json; from pathlib import Path
-cfg = json.loads((Path.home()/'.MultiTask/config.json').read_text())
+cfg = json.loads((Path.home()/'.MultiTaskWS/config.json').read_text())
 rt = cfg.get('rentalTracker', {})
 print('LLC_GPG_PASSPHRASE:', 'SET' if rt.get('LLC_GPG_PASSPHRASE') else 'MISSING')
 print('LLC_SECRET_KEY    :', 'SET' if rt.get('LLC_SECRET_KEY') else 'MISSING')
@@ -813,7 +812,7 @@ ls ~/llc/LLC-WBGroup/books/Accts/keys.json.gpg 2>/dev/null \
 # 6. pw.json.gpg decrypts
 LLC_PP=$(python3 -c "
 import json; from pathlib import Path
-print(json.loads((Path.home()/'.MultiTask/config.json').read_text())['rentalTracker']['LLC_GPG_PASSPHRASE'])
+print(json.loads((Path.home()/'.MultiTaskWS/config.json').read_text())['rentalTracker']['LLC_GPG_PASSPHRASE'])
 ")
 gpg --batch --decrypt --passphrase "$LLC_PP" \
     ~/llc/LLC-WBGroup/books/Accts/pw.json.gpg 2>/dev/null \
@@ -822,7 +821,7 @@ gpg --batch --decrypt --passphrase "$LLC_PP" \
  
 | File | Change |
 |---|---|
-| `pyMultiTaskWS` codebase | Rename `~/.MultiTaskWS/` → `~/.MultiTask/`; `MultiTaskWS_config.json` → `config.json` |
+| `pyMultiTaskWS` codebase | Rename `MultiTaskWS_config.json` → `config.json` (file only; `~/.MultiTaskWS/` directory unchanged) |
 | `pyMultiTaskWS/docs/design_trackerApp.md` | Update §3.5 per-BUS deployment clause |
 | `llcRentalTracker/wsgi.py` | Implement documented three-tier secret injection |
 | `llcRentalTracker/wsCmd.py` | Write `rentalTracker` stanza + `secrets:`; remove `keys.json.gpg` flow |
@@ -830,5 +829,5 @@ gpg --batch --decrypt --passphrase "$LLC_PP" \
 | `llcRentalTracker/docs/design_LLC_01.3-login_auth.md` | Rewrite startup sequence; remove keys.json.gpg |
 | `LLC-WBGroup/books/Accts/` | Remove `keys.json.gpg` only — `pw.json.gpg` stays |
 | `~/.llcRentalTracker/config.json` | Remove `master_passphrase`; fix duplicate stanza; migrate to nested schema |
-| `~/.MultiTask/config.json` | Add `rentalTracker: { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }` stanza |
+| `~/.MultiTaskWS/config.json` | Add `rentalTracker: { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }` stanza |
 | `~/.adminTracker/config.json` | Create (convention; initially empty) |
