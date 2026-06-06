@@ -184,8 +184,7 @@ python3 wsCmd.py --setup
 
 # Point PA WSGI file to:  /home/<user>/pyMultiTask/pyMultiTaskWS/wsgi.py
 # (PA dashboard → Web tab → WSGI configuration file)
-```
-
+```\
 **State after Step 1**
 ```
 ~/.MultiTask/config.json
@@ -196,8 +195,8 @@ python3 wsCmd.py --setup
 ---
 
 #### Step 2 — Setup adminTracker
-
-```bash
+\
+h
 cd ~/pyMultiTask/pyMultiTaskWS
 
 python3 adminTracker/wsCmd.py --setup
@@ -539,8 +538,288 @@ primary source in standalone mode (Tier 2 / Tier 3 order reversed when no platfo
 
 ---
 
-## Files Affected
+### Workflow 6 — Reset Host Configuration: Current → Target State
 
+Migrates both PA and local from the current messy state to the target architecture.
+Divided into two gates: **Now** (manual edits, no code changes needed) and
+**After Phase 2** (requires new code in `llcRentalTracker`).
+
+---
+
+#### Current State Snapshot
+
+**Preserve these values — read them from the current PA profile before changing anything:**
+
+| Value | Source (current) | Notes |
+|---|---|---|
+| `LLC_GPG_PASSPHRASE` | PA `llcProfile MultiTaskWS_Config.LLC_GPG_PASSPHRASE` | **PA value is canonical** — local has a typo (extra space) |
+| `LLC_SECRET_KEY` | PA `llcProfile MultiTaskWS_Config.LLC_SECRET_KEY` | Used for Flask sessions |
+| `adminTracker.APP_GPG_PASSPHRASE` | PA `~/.MultiTaskWS/MultiTaskWS_config.json` | Do not change |
+| `adminTracker.WEB_SECRET_KEY` | PA `~/.MultiTaskWS/MultiTaskWS_config.json` | Do not change |
+| `WEB_SECRET_KEY` (platform) | PA `~/.MultiTaskWS/MultiTaskWS_config.json` | Do not change |
+| `master_passphrase` | PA `~/.llcRentalTracker/config.json` | Remove after migration |
+
+```bash
+# On PA — read and record values before editing anything
+python3 -c "
+import json
+from pathlib import Path
+p = Path('/home/wbgroup/llc/LLC-WBGroup/books/Accts/llcProfile_WBGroupLLC.json')
+cfg = json.loads(p.read_text())
+mw = cfg.get('MultiTaskWS_Config', {})
+print('LLC_GPG_PASSPHRASE:', mw.get('LLC_GPG_PASSPHRASE'))
+print('LLC_SECRET_KEY    :', mw.get('LLC_SECRET_KEY'))
+"
+```
+
+**Known inconsistency — fix during migration:**
+Local `~/.llcRentalTracker/config.json` secrets has `"LLC_GPG_PASSPHRASE": "mylord,myredeemer, myrock"` (extra space). PA profile has `"mylord,myredeemer,myrock"` (no space). PA value is authoritative — local must be corrected to match.
+
+---
+
+#### Gate 1 — Now (no code changes required)
+
+These steps use the current `llcRentalTracker@a47da23` code. The Phase 1 fix already
+reads `~/.MultiTaskWS/MultiTaskWS_config.json` as Tier 3, so the rename can wait until
+Phase 2a code lands.
+
+**PA: Step 1 — Add missing `rentalTracker` stanza to MultiTaskWS config**
+
+Edit `~/.MultiTaskWS/MultiTaskWS_config.json` — add the stanza (using PA canonical values):
+
+```json
+"rentalTracker": {
+  "LLC_GPG_PASSPHRASE": "<value from Step 0 above>",
+  "LLC_SECRET_KEY":     "<value from Step 0 above>"
+}
+```
+
+```bash
+# Verify stanza written correctly
+python3 -c "
+import json; from pathlib import Path
+cfg = json.loads((Path.home()/'.MultiTaskWS/MultiTaskWS_config.json').read_text())
+print(json.dumps(cfg.get('rentalTracker', 'MISSING'), indent=2))
+"
+```
+
+**PA: Step 2 — Fix `~/.llcRentalTracker/config.json`**
+
+Replace the entire file:
+
+```json
+{
+  "default": ["WBGroupLLC", 2025],
+  "llcList": [
+    {
+      "llcName":   "WBGroupLLC",
+      "dataName":  "WBGroupLLC",
+      "bus_repo":  "/home/wbgroup/llc/LLC-WBGroup",
+      "books_dir": "books",
+      "years":     [2025]
+    }
+  ],
+  "secrets": {
+    "LLC_GPG_PASSPHRASE": "<PA canonical value>",
+    "LLC_SECRET_KEY":     "<PA canonical value>"
+  }
+}
+```
+
+Changes: removes duplicate stanza, fixes `llcName`, removes `master_passphrase`,
+adds `secrets:` block, adopts nested `years:` schema (`llcRentalTracker #19`).
+
+**PA: Step 3 — Clean `llcProfile_WBGroupLLC.json`** (PA = master, push from PA)
+
+Remove `YEAR`, `TOP`, `dirAccounting`, `MultiTaskWS_Config` — keep only `entity` and `F1065`.
+
+```bash
+cd ~/llc/LLC-WBGroup
+
+python3 -c "
+import json
+from pathlib import Path
+p = Path('books/Accts/llcProfile_WBGroupLLC.json')
+cfg = json.loads(p.read_text())
+# Keep only entity and F1065
+clean = {k: cfg[k] for k in ('entity', 'F1065') if k in cfg}
+p.write_text(json.dumps(clean, indent=2))
+print('Removed:', [k for k in cfg if k not in clean])
+"
+
+git add books/Accts/llcProfile_WBGroupLLC.json
+git commit -m "refactor(profile): remove filesystem keys — entity/F1065 only"
+git push
+```
+
+**PA: Step 4 — Remove `keys.json.gpg` from BUS repo** (if it exists)
+
+```bash
+cd ~/llc/LLC-WBGroup
+if [ -f books/Accts/keys.json.gpg ]; then
+  git rm books/Accts/keys.json.gpg
+  git commit -m "chore: remove keys.json.gpg — replaced by platform stanza"
+  git push
+else
+  echo "keys.json.gpg not present — nothing to remove"
+fi
+```
+
+**PA: Step 5 — Reload and verify**
+
+```bash
+# PA dashboard → Web tab → Reload
+# Then visit https://<pa-domain>/rentalTracker/login
+# App should start; LLC_GPG_PASSPHRASE loaded from rentalTracker stanza (Tier 2)
+```
+
+Expected startup log (PA error log):
+```
+startup: llc=WBGroupLLC year=2025 secret_key_src=mw_config gpg_passphrase=set
+```
+
+---
+
+#### Local: Gate 1 Steps (parallel with PA, no code needed)
+
+**Local: Step 1 — Pull cleaned BUS repo**
+
+```bash
+cd /path/to/LLC-WBGroup
+git pull
+# Gets cleaned llcProfile_WBGroupLLC.json (no filesystem keys)
+```
+
+**Local: Step 2 — Fix `~/.llcRentalTracker/config.json`**
+
+Replace the `llcList` entry and fix the passphrase typo (remove the extra space):
+
+```json
+{
+  "default": ["WBGroupLLC", 2025],
+  "llcList": [
+    {
+      "llcName":   "WBGroupLLC",
+      "dataName":  "WBGroupLLC",
+      "bus_repo":  "/Users/frankrojas/Library/CloudStorage/GoogleDrive-frankr6591@gmail.com/My Drive/Family/Assets/LLC-WBGroup",
+      "books_dir": "books",
+      "years":     [2025]
+    }
+  ],
+  "secrets": {
+    "LLC_GPG_PASSPHRASE": "<PA canonical value — no trailing space>",
+    "LLC_SECRET_KEY":     "<local key — can differ from PA for standalone>"
+  }
+}
+```
+
+**Local: Step 3 — Verify standalone start**
+
+```bash
+cd /path/to/llcRentalTracker
+python3 wsCmd.py --start --llcName WBGroupLLC --year 2025 --port 5000 --load
+# Reads secrets from ~/.llcRentalTracker/config.json  secrets: block (Tier 3)
+```
+
+---
+
+#### Gate 2 — After Phase 2 Code (requires llcRentalTracker Phase 2 merge)
+
+Once `llcRentalTracker` Phase 2a–2d is merged and pushed:
+
+**PA: Step 6 — Pull Phase 2 code**
+
+```bash
+cd ~/pyTrackers/llcRentalTracker
+git pull
+```
+
+**PA + Local: Step 7 — Rename platform config directory**
+
+```bash
+# PA (and local if MultiTaskWS is installed):
+mv ~/.MultiTaskWS ~/.MultiTask
+mv ~/.MultiTask/MultiTaskWS_config.json ~/.MultiTask/config.json
+```
+
+**PA: Step 8 — Run `wsCmd.py --setup` to verify and formalize**
+
+```bash
+cd ~/pyTrackers/llcRentalTracker
+python3 wsCmd.py --setup --llcName WBGroupLLC
+# With Phase 2 code:
+# → reads secrets from ~/.llcRentalTracker/config.json secrets: (already set in Gate 1)
+# → writes rentalTracker stanza to ~/.MultiTask/config.json   (formalizes it)
+# → verifies pw.json.gpg decrypts correctly
+# → prints "✓ Configuration verified"
+```
+
+**PA: Step 9 — Final reload and smoke test**
+
+```bash
+# PA dashboard → Web tab → Reload
+```
+
+Expected startup log after Phase 2:
+```
+startup: llc=WBGroupLLC year=2025 secret_key_src=env gpg_passphrase=set
+```
+(Tier 2 from `~/.MultiTask/config.json` `rentalTracker:` stanza — no more Tier 3 fallback needed)
+
+---
+
+#### Target State Verification Checklist
+
+After all steps complete, verify on PA:
+
+```bash
+# 1. Platform config in correct location
+ls ~/.MultiTask/config.json                                       # ✓ exists
+
+# 2. rentalTracker stanza present
+python3 -c "
+import json; from pathlib import Path
+cfg = json.loads((Path.home()/'.MultiTask/config.json').read_text())
+rt = cfg.get('rentalTracker', {})
+print('LLC_GPG_PASSPHRASE:', 'SET' if rt.get('LLC_GPG_PASSPHRASE') else 'MISSING')
+print('LLC_SECRET_KEY    :', 'SET' if rt.get('LLC_SECRET_KEY') else 'MISSING')
+"
+
+# 3. llcRentalTracker config clean
+python3 -c "
+import json; from pathlib import Path
+cfg = json.loads((Path.home()/'.llcRentalTracker/config.json').read_text())
+print('llcList count  :', len(cfg.get('llcList', [])))   # should be 1
+print('master_pp      :', 'PRESENT — REMOVE' if 'master_passphrase' in cfg else 'absent ✓')
+print('secrets        :', 'SET' if cfg.get('secrets', {}).get('LLC_GPG_PASSPHRASE') else 'MISSING')
+stanza = cfg['llcList'][0]
+print('llcName        :', stanza.get('llcName'))          # WBGroupLLC
+print('years          :', stanza.get('years'))            # [2025]
+"
+
+# 4. Profile is clean
+python3 -c "
+import json; from pathlib import Path
+p = Path('/home/wbgroup/llc/LLC-WBGroup/books/Accts/llcProfile_WBGroupLLC.json')
+cfg = json.loads(p.read_text())
+bad = [k for k in ('YEAR','TOP','dirAccounting','MultiTaskWS_Config') if k in cfg]
+print('Filesystem keys still present:', bad or 'none ✓')
+"
+
+# 5. keys.json.gpg removed
+ls ~/llc/LLC-WBGroup/books/Accts/keys.json.gpg 2>/dev/null \
+  && echo "PRESENT — REMOVE" || echo "absent ✓"
+
+# 6. pw.json.gpg decrypts
+LLC_PP=$(python3 -c "
+import json; from pathlib import Path
+print(json.loads((Path.home()/'.MultiTask/config.json').read_text())['rentalTracker']['LLC_GPG_PASSPHRASE'])
+")
+gpg --batch --decrypt --passphrase "$LLC_PP" \
+    ~/llc/LLC-WBGroup/books/Accts/pw.json.gpg 2>/dev/null \
+  && echo "pw.json.gpg decrypts ✓" || echo "DECRYPT FAILED"
+```
+ 
 | File | Change |
 |---|---|
 | `pyMultiTaskWS` codebase | Rename `~/.MultiTaskWS/` → `~/.MultiTask/`; `MultiTaskWS_config.json` → `config.json` |
