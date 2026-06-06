@@ -141,31 +141,280 @@ Same values, two access paths. The `secrets:` block is not a flaw — it must ex
 standalone mode. Only `master_passphrase` is removed (it belonged to `keys.json.gpg`,
 which is going away).
 
-#### Passphrase & SECRET_KEY setup and management workflow
+#### Passphrase & SECRET_KEY — Runtime injection priority
 
-**Initial setup (`wsCmd.py --setup` on any host)**
-1. Generate `LLC_GPG_PASSPHRASE` + `LLC_SECRET_KEY` (or prompt operator)
-2. Write `rentalTracker: { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }` to `~/.MultiTask/config.json`
-3. Write the same values to `~/.llcRentalTracker/config.json` `secrets:` block
-4. Create `pw.json.gpg` in BUS repo encrypted with `LLC_GPG_PASSPHRASE`; push from PA
-
-**Runtime injection priority (wsgi.py / wsCmd.py --start)**
 ```
-Tier 1: os.environ already set (operator / PA env tab)          ← highest
-Tier 2: ~/.MultiTask/config.json  rentalTracker: stanza         ← platform mode
-Tier 3: ~/.llcRentalTracker/config.json  secrets: block         ← standalone mode
+Tier 1: os.environ already set (operator / PA env tab)               ← highest
+Tier 2: ~/.MultiTask/config.json   rentalTracker: stanza             ← platform mode
+Tier 3: ~/.llcRentalTracker/config.json  secrets: block              ← standalone fallback
 ```
 
-**Key rotation**
-1. Regenerate `LLC_GPG_PASSPHRASE` + `LLC_SECRET_KEY`
-2. Re-encrypt `pw.json.gpg` with new passphrase; push from PA (master host)
-3. Update both `~/.MultiTask/config.json` and `~/.llcRentalTracker/config.json` on all hosts
-4. git pull on all hosts + reload app
+---
 
-**Adding a second host (local dev or new PA account)**
-1. Clone both repos
-2. Run `wsCmd.py --setup` — writes stanza + secrets block with the shared passphrase
-3. `git pull` on BUS repo → gets PA's `pw.json.gpg` (same users, same passphrase)
+## Operational Workflows
+
+Ordered from initial PA account acquisition to daily operations.
+Each workflow is self-contained with exact commands.
+
+---
+
+### Workflow 1 — New PA Instance: Full Platform + Tracker Setup
+
+**Prerequisites**
+- PA account created; console access available
+- GitHub repos exist: `pyMultiTaskWS`, `llcRentalTracker`, `LLC-WBGroup`
+- `gpg` and `python3.10+` available on PA
+
+---
+
+#### Step 1 — Setup MultiTask Platform
+
+```bash
+# Clone platform repo
+mkdir ~/pyMultiTask && cd ~/pyMultiTask
+git clone https://github.com/wbgroupmgr/pyMultiTaskWS.git
+cd pyMultiTaskWS
+
+# Bootstrap platform — creates ~/.MultiTask/config.json
+# Generates WEB_SECRET_KEY; registers platform Trackers list
+python3 wsCmd.py --setup
+# → prompts: Enter platform WEB_SECRET_KEY (or auto-generate?)
+# → writes ~/.MultiTask/config.json:
+#     { WEB_SECRET_KEY, Trackers: [] }
+
+# Point PA WSGI file to:  /home/<user>/pyMultiTask/pyMultiTaskWS/wsgi.py
+# (PA dashboard → Web tab → WSGI configuration file)
+```
+
+**State after Step 1**
+```
+~/.MultiTask/config.json
+  WEB_SECRET_KEY: "<generated>"
+  Trackers: []
+```
+
+---
+
+#### Step 2 — Setup adminTracker
+
+```bash
+cd ~/pyMultiTask/pyMultiTaskWS
+
+python3 adminTracker/wsCmd.py --setup
+# → generates unique APP_GPG_PASSPHRASE (distinct from all other trackers)
+# → generates unique WEB_SECRET_KEY for adminTracker
+# → writes adminTracker stanza to ~/.MultiTask/config.json
+# → creates ~/.adminTracker/config.json
+# → creates adminTracker/Accts/pw.json.gpg  (seed user: admin / change immediately)
+# → registers adminTracker in Trackers list
+```
+
+**State after Step 2**
+```
+~/.MultiTask/config.json
+  WEB_SECRET_KEY: "<platform key>"
+  Trackers: [ { name: AdminTracker, stanza_key: adminTracker, ... } ]
+  adminTracker: {
+    APP_GPG_PASSPHRASE: "<unique passphrase>",
+    WEB_SECRET_KEY:     "<unique key>"
+  }
+
+~/.adminTracker/config.json   (created; tracker-specific non-secret config)
+
+pyMultiTaskWS/adminTracker/Accts/pw.json.gpg   (seed user — change password now)
+```
+
+Login at `https://<pa-domain>/admin/login` → change seed password immediately.
+
+---
+
+#### Step 3 — Clone BUS Repo
+
+```bash
+mkdir ~/llc && cd ~/llc
+git clone https://github.com/wbgroupmgr/LLC-WBGroup.git
+# BUS data now at:  ~/llc/LLC-WBGroup/books/Accts/
+```
+
+---
+
+#### Step 4 — Setup llcRentalTracker
+
+```bash
+mkdir ~/pyTrackers && cd ~/pyTrackers
+git clone https://github.com/wbgroupmgr/llcRentalTracker.git
+cd llcRentalTracker
+```
+
+**4a — Register BUS + set tracker passphrase**
+
+```bash
+python3 wsCmd.py --newBus ~/llc/LLC-WBGroup --year 2025 --llcName WBGroupLLC
+# → prompts: Enter LLC_GPG_PASSPHRASE for this tracker (unique; not shared with adminTracker)
+# → creates ~/.llcRentalTracker/config.json  (if absent):
+#     { default: [WBGroupLLC, 2025],
+#       llcList: [{ llcName: WBGroupLLC, bus_repo: ~/llc/LLC-WBGroup,
+#                   books_dir: books, years: [2025] }],
+#       secrets: { LLC_GPG_PASSPHRASE: "<entered>" }
+#     }
+# → sets default to WBGroupLLC/2025
+```
+
+**4b — Setup tracker secrets + user DB**
+
+```bash
+python3 wsCmd.py --setup --llcName WBGroupLLC
+# → reads LLC_GPG_PASSPHRASE from ~/.llcRentalTracker/config.json secrets:
+# → generates LLC_SECRET_KEY
+# → writes rentalTracker stanza to ~/.MultiTask/config.json:
+#     rentalTracker: { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }
+# → writes LLC_SECRET_KEY back to ~/.llcRentalTracker/config.json secrets:
+# → registers rentalTracker in Trackers list in ~/.MultiTask/config.json
+# → creates BUS/books/Accts/pw.json.gpg  (seed user: llcgroupmgr / change immediately)
+# → prints: "Push pw.json.gpg to BUS repo now (PA = master host)"
+
+# Push pw.json.gpg — PA is the master host for the BUS repo
+cd ~/llc/LLC-WBGroup
+git add books/Accts/pw.json.gpg
+git commit -m "auth: initial user DB"
+git push
+cd ~/pyTrackers/llcRentalTracker
+```
+
+**State after Step 4b**
+```
+~/.MultiTask/config.json
+  WEB_SECRET_KEY: "<platform key>"
+  Trackers: [ adminTracker, rentalTracker ]
+  adminTracker:   { APP_GPG_PASSPHRASE, WEB_SECRET_KEY }
+  rentalTracker:  { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }   ← NEW
+
+~/.llcRentalTracker/config.json
+  default: [WBGroupLLC, 2025]
+  llcList: [{ llcName: WBGroupLLC, bus_repo: ..., books_dir: books, years: [2025] }]
+  secrets: { LLC_GPG_PASSPHRASE, LLC_SECRET_KEY }          ← standalone fallback
+
+LLC-WBGroup/books/Accts/pw.json.gpg   (in BUS repo, pushed — seed user)
+```
+
+**4c — Reload PA / verify**
+
+```bash
+# PA Web tab → Reload
+# Visit https://<pa-domain>/rentalTracker/login
+# Login: llcgroupmgr / llcManager0!  → change password immediately
+```
+
+**4c (standalone) — Start for local testing**
+
+```bash
+python3 wsCmd.py --start --llcName WBGroupLLC --year 2025 --port 5000 --load
+# → reads secrets from ~/.llcRentalTracker/config.json secrets: (Tier 3)
+# → starts Flask at http://localhost:5000/rentalTracker
+```
+
+---
+
+### Workflow 2 — Local Dev Setup (after PA is running)
+
+```bash
+# Clone both repos
+git clone https://github.com/wbgroupmgr/llcRentalTracker.git
+git clone https://github.com/wbgroupmgr/LLC-WBGroup.git
+
+cd llcRentalTracker
+
+# Register BUS at the local path (same llcName, same passphrase as PA)
+python3 wsCmd.py --newBus /path/to/LLC-WBGroup --year 2025 --llcName WBGroupLLC
+# → prompts for LLC_GPG_PASSPHRASE — enter the SAME value as PA
+#   (same passphrase required to decrypt pw.json.gpg from the BUS repo)
+# → creates ~/.llcRentalTracker/config.json with local bus_repo path
+
+python3 wsCmd.py --setup --llcName WBGroupLLC
+# → writes secrets: block to ~/.llcRentalTracker/config.json
+# → does NOT write platform stanza (no ~/.MultiTask/ needed locally)
+# → does NOT create pw.json.gpg (pull it from BUS repo instead)
+
+# Pull pw.json.gpg from PA-committed BUS repo
+cd /path/to/LLC-WBGroup && git pull
+cd /path/to/llcRentalTracker
+
+# Start local
+python3 wsCmd.py --start --llcName WBGroupLLC --year 2025 --port 5000 --load
+```
+
+**Key rule:** Local dev never pushes `pw.json.gpg` to the BUS repo.
+User management happens on PA only.
+
+---
+
+### Workflow 3 — Add a New Fiscal Year (e.g. 2026)
+
+```bash
+# On PA:
+cd ~/pyTrackers/llcRentalTracker
+python3 wsCmd.py --newBus ~/llc/LLC-WBGroup --year 2026 --llcName WBGroupLLC
+# → appends 2026 to existing WBGroupLLC stanza: years: [2025, 2026]
+# → no new stanza created (same bus_repo, same passphrase)
+# → no pw.json.gpg changes
+
+# PA Web tab → Reload
+# Switch year in app UI, or:
+python3 wsCmd.py --start --llcName WBGroupLLC --year 2026 --port 5000
+
+# Local: same command with local path
+python3 wsCmd.py --newBus /path/to/LLC-WBGroup --year 2026 --llcName WBGroupLLC
+```
+
+---
+
+### Workflow 4 — Add a Second BUS (new LLC)
+
+```bash
+# On PA: clone or create new BUS repo
+cd ~/llc && git clone https://github.com/owner/LLC2.git
+
+cd ~/pyTrackers/llcRentalTracker
+python3 wsCmd.py --newBus ~/llc/LLC2 --year 2025 --llcName LLC2Name
+# → prompts for LLC2's LLC_GPG_PASSPHRASE (NEW unique passphrase — not shared with BUS1)
+# → adds LLC2Name stanza to ~/.llcRentalTracker/config.json llcList
+# → does NOT overwrite WBGroupLLC stanza
+
+python3 wsCmd.py --setup --llcName LLC2Name
+# → creates LLC2/books/Accts/pw.json.gpg encrypted with LLC2's passphrase
+# → NOTE: rentalTracker platform stanza holds ONE tracker's secrets
+#   If multiple BUS instances are deployed as separate PA accounts (one per BUS),
+#   each PA account runs its own wsCmd.py --setup with its own stanza.
+#   A single PA account running multiple BUS instances is not yet supported.
+
+# Push LLC2 pw.json.gpg from PA
+cd ~/llc/LLC2
+git add books/Accts/pw.json.gpg && git commit -m "auth: initial user DB" && git push
+```
+
+---
+
+### Workflow 5 — Key Rotation
+
+```bash
+# On PA — generates new LLC_GPG_PASSPHRASE + LLC_SECRET_KEY
+cd ~/pyTrackers/llcRentalTracker
+python3 wsCmd.py --rotate-keys --llcName WBGroupLLC
+# → prompts: Enter new LLC_GPG_PASSPHRASE
+# → re-encrypts BUS/books/Accts/pw.json.gpg with new passphrase
+# → updates rentalTracker stanza in ~/.MultiTask/config.json
+# → updates secrets: in ~/.llcRentalTracker/config.json
+
+# Push rotated pw.json.gpg
+cd ~/llc/LLC-WBGroup
+git add books/Accts/pw.json.gpg && git commit -m "auth: rotate keys" && git push
+
+# PA Web tab → Reload
+
+# All other hosts: git pull BUS repo + re-run --setup with new passphrase
+git pull
+python3 wsCmd.py --setup --llcName WBGroupLLC   # enter new passphrase when prompted
+```
 
 ### Design Flaw 4 — Naming inconsistency across layers
 
