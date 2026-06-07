@@ -46,9 +46,9 @@ Every level of the platform has exactly one `wsCmd.py`:
 
 | File | Scope | `--setup` | `--start` |
 |------|-------|-----------|-----------|
-| `wsCmd.py` | **Platform** | Interactive setup: passphrase, deps, adminTracker DB seed, write `~/.MultiTaskWS/MultiTaskWS_config.json` | Full WSGI dispatcher (all Trackers via DispatcherMiddleware) |
+| `wsCmd.py` | **Platform** | Interactive setup: passphrase, deps, adminTracker DB seed, write `~/.MultiTaskWS/config.json` | Full WSGI dispatcher (all Trackers via DispatcherMiddleware) |
 | `adminTracker/wsCmd.py` | **AdminTracker** | Reseed adminTracker user DB (reads passphrase from platform config) | AdminTracker standalone, no dispatcher prefix |
-| `<tracker>/wsCmd.py` | **Tracker** | Tracker-specific setup (reads passphrase from platform config) | Tracker standalone |
+| `<tracker>/wsCmd.py` | **Tracker** | Tracker-specific setup (reads passphrase from tracker config) | Tracker standalone |
 
 **Typical workflow:**
 
@@ -79,7 +79,7 @@ pyMultiTaskWS (DispatcherMiddleware — built by WsCmd.make_application())
 │                               └── Flask app  ←  adminTracker/wsgi.py
 │                               └── Home page shows all mounted Trackers
 │
-├── /llc  ──────────────→  LLC Tracker  (WBGroup LLC Editor)
+├── /rentalTracker  ────→  llcRentalTracker  (WBGroup LLC Editor)
 │                              └── Flask app  ←  wsgi.py  [separate repo]
 │
 └── /trackHealth  ──────→  Health Tracker  (future)
@@ -98,19 +98,24 @@ Browser → WSGI server
 
 ---
 
-### 1.4 Platform Config — `~/.MultiTaskWS/MultiTaskWS_config.json`
+### 1.4 Platform Config — `~/.MultiTaskWS/config.json`
 
-`wsCmd.py --setup` writes the platform config to `~/.MultiTaskWS/`. This file holds:
+`wsCmd.py --setup` writes the platform config to `~/.MultiTaskWS/config.json`.
+This file holds platform credentials and one stanza per registered Tracker:
 
 ```json
 {
   "WEB_GPG_PASSPHRASE": "...",
-  "WEB_SECRET_KEY": "...",
-  "WebServer": "Host_wbgroup",
+  "WEB_SECRET_KEY":     "...",
+  "WebServer":          "Host_wbgroup",
   "Trackers": [ ... ],
   "adminTracker": {
-    "APP_GPG_PASSPHRASE": "<master>_adminTracker",
-    "WEB_SECRET_KEY": "..."
+    "APP_GPG_PASSPHRASE": "...",
+    "APP_SECRET_KEY":     "..."
+  },
+  "llcRentalTracker": {
+    "APP_GPG_PASSPHRASE": "...",
+    "APP_SECRET_KEY":     "..."
   }
 }
 ```
@@ -119,32 +124,32 @@ Each Tracker entry in `Trackers` is used to:
 - Populate `adminTracker.registry.TRACKERS` (shown on the admin home page)
 - Mount the Tracker's Flask app in the dispatcher
 
-External Trackers (not built into this repo) carry `sys_path` and a `stanza_key`.
-Their credentials live in their own top-level stanza — same pattern as `adminTracker`:
+External Trackers (not built into this repo) carry `sys_path` and a `stanza_key`
+that matches the git repo name. Their credentials live in a top-level stanza
+using the same name:
 
 ```json
 {
   "Trackers": [
     {
-      "name":        "PropRental Tracker",
-      "mount":       "/llc",
-      "url":         "/llc/login",
+      "name":        "LLC Rental Tracker",
+      "mount":       "/rentalTracker",
+      "url":         "/rentalTracker/login",
       "description": "W&B Group LLC — double-entry ledger & IRS forms",
       "status":      "online",
-      "sys_path":    "/home/wbgroup/llc/LLC-WB-Group/pages/AccountingData/Notebooks",
-      "stanza_key":  "llc"
+      "sys_path":    "/home/wbgroup/pyTrackers/llcRentalTracker",
+      "stanza_key":  "llcRentalTracker"
     }
   ],
-  "llc": {
-    "LLC_GPG_PASSPHRASE": "<master>_llc",
-    "LLC_SECRET_KEY":     "<tracker-specific-random>"
+  "llcRentalTracker": {
+    "APP_GPG_PASSPHRASE": "...",
+    "APP_SECRET_KEY":     "..."
   }
 }
 ```
 
-`make_application()` reads `cfg["llc"]`, injects those env vars, adds `sys_path` to
-`sys.path`, then imports `wsgi.py` from that root via `importlib.util.spec_from_file_location`.
-`stanza_key` defaults to the mount slug (`llc`) if omitted.
+`make_application()` reads `cfg["llcRentalTracker"]`, injects those env vars, adds
+`sys_path` to `sys.path`, then imports `wsgi.py` from that root.
 
 File is `chmod 600` — owner-readable only. Never committed to git.
 
@@ -162,7 +167,8 @@ https://<host>/<TrackerID>/
     └── <TrackerID>/api/<...>   ← Tracker API (JSON 401 if not logged in)
 ```
 
-The `<TrackerID>` must be globally unique across the Platform and matches the `mount` value in the config (e.g., `admin`, `llc`, `health`).
+The `<TrackerID>` must be globally unique across the Platform and matches the `mount`
+value in the config (e.g., `admin`, `rentalTracker`, `health`).
 
 ---
 
@@ -180,7 +186,9 @@ any other. There is no cross-Tracker single sign-on.
 - `load_users` / `save_users` / `find_user` — GPG-encrypted JSON DB helpers.
 - `hash_password` — SHA-256 hex digest.
 
-Each Tracker uses its own `APP_GPG_PASSPHRASE` (derived as `<master>_<stanza_key>`) for its user DB.
+Each Tracker uses its own `APP_GPG_PASSPHRASE` for its user DB. The tracker's
+`wsCmd.py --setup` sets this passphrase and writes it to both
+`~/.<trackerRepo>/config.json` and the platform stanza.
 
 ---
 
@@ -210,8 +218,11 @@ pyMultiTaskWS/
 │       └── home.html           ← Tracker index — lists all registered apps + status
 │
 └── docs/
-    ├── design_webserver.md     ← This file — platform architecture & setup
-    └── design_trackerApp.md    ← Tracker app development & PA integration
+    ├── design_pyMultiTaskWS.md ← This file — platform architecture & setup
+    ├── design_trackerApp.md    ← Tracker app development & PA integration
+    ├── design_setup.md         ← Config & setup concepts; AS-IS → TO-BE action plan
+    ├── design_setup_llcRentalTracker.md ← llcRentalTracker TO-BE setup
+    └── design_setup_adminTracker.md     ← adminTracker TO-BE setup
 ```
 
 ---
@@ -235,7 +246,7 @@ python3 wsCmd.py --setup
 ```
 
 The `--setup` command installs Flask and Werkzeug, seeds the adminTracker user DB,
-and writes `~/.MultiTaskWS/MultiTaskWS_config.json`.
+and writes `~/.MultiTaskWS/config.json`.
 
 ### 3.3 Start Locally
 
@@ -304,16 +315,13 @@ After signing in at `/admin/`, the AdminTracker home page shows:
 │   ├── multitrack/
 │   └── adminTracker/
 │
-├── llc/                        ← TrackerID directory
-│   └── LLC-WB-Group/
-│       └── pages/AccountingData/Notebooks/
-│           └── wsgi.py         ← LLC Tracker entry point
+├── pyTrackers/
+│   └── llcRentalTracker/       ← llcRentalTracker repo
+│       └── wsgi.py             ← LLC Tracker entry point
 │
 └── ~/.MultiTaskWS/
-    └── MultiTaskWS_config.json  ← Platform config (chmod 600, not in git)
+    └── config.json             ← Platform config (chmod 600, not in git)
 ```
-
-**Convention:** `TrackerID == mount point slug == directory name under /home/wbgroup/`
 
 ---
 
@@ -361,9 +369,9 @@ python3.10 wsCmd.py --setup
 
 | Step | Action |
 |------|--------|
-| 1 | Prompts for master passphrase → stored as `WEB_GPG_PASSPHRASE` (min 12 chars, confirmed) |
+| 1 | Prompts for platform passphrase → stored as `WEB_GPG_PASSPHRASE` (min 12 chars, confirmed) |
 | 2 | Installs `flask` and `werkzeug` via pip |
-| 3 | Derives `adminTracker.APP_GPG_PASSPHRASE = <master>_adminTracker`; writes `~/.MultiTaskWS/MultiTaskWS_config.json` |
+| 3 | Generates `WEB_SECRET_KEY`; writes `~/.MultiTaskWS/config.json` with `adminTracker` stanza |
 | 4 | Seeds `adminTracker/Accts/pw.json.gpg` with `webadmin / WebAdmin0!` |
 
 ---
@@ -384,7 +392,7 @@ python3.10 wsCmd.py --setup
 |------|-------|---------|
 | `wsCmd.py` | Platform | CLI — `--setup` (platform config) and `--start` (full dispatcher) |
 | `wsgi.py` | Platform | PA entry point — thin wrapper around `WsCmd().make_application()` |
-| `~/.MultiTaskWS/MultiTaskWS_config.json` | Platform | Credentials + Tracker list (chmod 600, not in git) |
+| `~/.MultiTaskWS/config.json` | Platform | Credentials + Tracker list (chmod 600, not in git) |
 | `multitrack/auth.py` | Platform | Shared auth — import in every Tracker |
 | `multitrack/templates/login.html` | Platform | Generic login page |
 | `multitrack/templates/register.html` | Platform | Generic register page |
@@ -402,9 +410,10 @@ python3.10 wsCmd.py --setup
 
 | Concern | Approach |
 |---------|---------|
-| Credentials in config | `~/.MultiTaskWS/MultiTaskWS_config.json` is `chmod 600`; never in git |
-| GPG passphrase | Per-tracker `APP_GPG_PASSPHRASE` derived from master; passed to `gpg` via `os.pipe()` — invisible in `ps aux` |
-| Flask secret key | Generated at setup; stored per-tracker stanza in platform config |
+| Credentials in config | `~/.MultiTaskWS/config.json` is `chmod 600`; never in git |
+| GPG passphrase | Per-tracker `APP_GPG_PASSPHRASE` unique per tracker; passed to `gpg` via `os.pipe()` — invisible in `ps aux` |
+| Flask secret key | Generated at setup; stored per-tracker stanza in platform config and in `~/.<trackerRepo>/config.json` |
 | User passwords | SHA-256 hashed; plaintext never written to disk |
 | Cross-Tracker isolation | Separate user DBs, separate Flask secret keys, separate passphrases |
-| User DB files | `**/Accts/*.gpg` excluded from git via `.gitignore` |
+| User DB files (adminTracker) | `**/Accts/*.gpg` excluded from git via `.gitignore` |
+| User DB files (external trackers) | Live in their BUS data repo; see [design_setup.md](design_setup.md) |

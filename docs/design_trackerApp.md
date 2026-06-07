@@ -2,7 +2,7 @@
 
 > This guide is for developers building or integrating a Tracker app into the
 > MultiTrack Web Platform. For platform architecture and initial PA setup, see
-> [design_webserver.md](design_webserver.md).
+> [design_pyMultiTaskWS.md](design_pyMultiTaskWS.md).
 
 ---
 
@@ -181,7 +181,7 @@ containing `wsgi.py` and `wsCmd.py` (the repo root shown above).
 
 ## 4. PythonAnywhere Integration — Adding & Updating Tracker Apps
 
-> **Prerequisite**: platform is already deployed (see [design_webserver.md §4](design_webserver.md)).
+> **Prerequisite**: platform is already deployed (see [design_pyMultiTaskWS.md §4](design_pyMultiTaskWS.md)).
 > Tracker App repo must satisfy the contract in §2 above.
 
 ### 4.1 Adding an External Tracker App
@@ -285,7 +285,7 @@ git pull origin main
 | `<trackerid>/app.py` | Tracker | Flask app class — calls `make_auth_routes`, defines views |
 | `<trackerid>/templates/` | Tracker | Jinja2 templates — must use `url_for()` throughout |
 
-> For platform-side key files, see [design_webserver.md §5](design_webserver.md).
+> For platform-side key files, see [design_pyMultiTaskWS.md §5](design_pyMultiTaskWS.md).
 
 ---
 
