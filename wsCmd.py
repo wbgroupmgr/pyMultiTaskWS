@@ -100,7 +100,8 @@ class WsCmd:
     """
 
     CONFIG_DIR  = Path.home() / ".MultiTaskWS"
-    CONFIG_PATH = CONFIG_DIR  / "MultiTaskWS_config.json"
+    CONFIG_PATH = CONFIG_DIR  / "config.json"
+    _LEGACY_PATH = CONFIG_DIR / "MultiTaskWS_config.json"
 
     def __init__(self):
         pass
@@ -108,6 +109,10 @@ class WsCmd:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _load_config(self) -> dict:
+        # Auto-migrate legacy filename on first access
+        if not self.CONFIG_PATH.exists() and self._LEGACY_PATH.exists():
+            self._LEGACY_PATH.rename(self.CONFIG_PATH)
+            print(f"  ℹ  Migrated {self._LEGACY_PATH.name} → {self.CONFIG_PATH.name}")
         if not self.CONFIG_PATH.exists():
             return {}
         return json.loads(self.CONFIG_PATH.read_text(encoding="utf-8"))
