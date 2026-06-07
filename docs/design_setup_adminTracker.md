@@ -236,8 +236,12 @@ print('Trackers:', [t.get('stanza_key') for t in cfg.get('Trackers', [])])
 # llcRentalTracker has no stanza here — external tracker reads its own config
 "
 
-# 2. adminTracker config present
-ls -la ~/.adminTracker/config.json    # should exist, chmod 600
+# 2. adminTracker config present (created by --setup)
+python3 -c "
+from pathlib import Path
+p = Path.home()/'.adminTracker/config.json'
+print('~/.adminTracker/config.json:', 'present ✓' if p.exists() else 'MISSING — re-run --setup')
+"
 
 # 3. adminTracker user DB decrypts
 AT_PP=$(python3 -c "

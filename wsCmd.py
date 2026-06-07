@@ -218,6 +218,19 @@ class WsCmd:
         print(f"  ✓ Saved → {self.CONFIG_PATH}  (chmod 600)")
         print(f"    WebServer : {cfg['WebServer']}")
 
+        # Create ~/.adminTracker/config.json (per-tracker config convention)
+        admin_cfg_dir  = Path.home() / ".adminTracker"
+        admin_cfg_file = admin_cfg_dir / "config.json"
+        admin_cfg_dir.mkdir(parents=True, exist_ok=True)
+        if not admin_cfg_file.exists():
+            admin_cfg_file.write_text(
+                json.dumps({"trackerName": "adminTracker",
+                            "WebServer": cfg["WebServer"]}, indent=2),
+                encoding="utf-8"
+            )
+            admin_cfg_file.chmod(0o600)
+            print(f"  ✓ Created {admin_cfg_file}")
+
     def _seed_admin_db(self) -> None:
         """Seed adminTracker/Accts/pw.json.gpg using the adminTracker stanza passphrase."""
         print("\n── Step 4: AdminTracker User Database ──────────────────────────")
