@@ -144,7 +144,7 @@ What it does (for `--llcName WBGroupLLC`):
 
 > **Note:** `APP_SECRET_KEY` is generated once for the tracker, not per BUS. If you run
 > `--setup` for a second BUS (`--llcName otherBUS`), the existing `APP_SECRET_KEY` is
-> reused — only `pw.json.gpg` is created for the new BUS using its own passphrase.
+> reused. If BUS does not have `pw.json.gpg` a new one is created, otherwise the existing BUS `pw.json.gpg` is use with the BUS passphrase.
 >
 > On local dev, step 4 is skipped silently (no `~/.MultiTaskWS/config.json`) — correct
 > behavior for standalone mode.
@@ -172,8 +172,22 @@ Run on **local first**, then repeat on **PA**. Identical steps; only paths diffe
 
 ### Step 0 — Record current secrets (before deleting anything)
 
+The passphrase is in `books/Accts/llcProfile_WBGroupLLC.json` — NOT in the repo root.
+The repo root also has a `llcProfile_WBGroupLLC.json` (TO-BE clean template, entity/F1065 only,
+no MultiTaskWS_Config). Using the wrong file gives a "no MultiTaskWS_Config" result or a JSON error.
+
 ```bash
-# Read the current LLC_GPG_PASSPHRASE from the existing profile (current code, PA)
+# Local — use the actual GDrive path with books/Accts/:
+python3 -c "
+import json; from pathlib import Path
+p = Path('~/GDrive/Family/Assets/LLC-WBGroup/books/Accts/llcProfile_WBGroupLLC.json').expanduser()
+cfg = json.loads(p.read_text())
+mw = cfg.get('MultiTaskWS_Config', {})
+print('LLC_GPG_PASSPHRASE:', mw.get('LLC_GPG_PASSPHRASE'))
+print('LLC_SECRET_KEY    :', mw.get('LLC_SECRET_KEY'))
+"
+
+# PA:
 python3 -c "
 import json; from pathlib import Path
 p = Path('~/llc/LLC-WBGroup/books/Accts/llcProfile_WBGroupLLC.json').expanduser()
@@ -184,9 +198,8 @@ print('LLC_SECRET_KEY    :', mw.get('LLC_SECRET_KEY'))
 "
 ```
 
-Record these values. The `LLC_GPG_PASSPHRASE` value becomes your `APP_GPG_PASSPHRASE`
-in the new setup — using the same value means `pw.json.gpg` continues to decrypt
-without requiring user re-registration.
+Record the `LLC_GPG_PASSPHRASE` value — this becomes your `APP_GPG_PASSPHRASE` for WBGroupLLC.
+Using the same value means `pw.json.gpg` continues to decrypt without re-registering users.
 
 ### Step 1 — Delete old config and git clones
 
@@ -243,11 +256,14 @@ cd <path/to/LLC-WBGroup>
 python3 -c "
 import json; from pathlib import Path
 p = Path('books/Accts/llcProfile_WBGroupLLC.json')
+p = Path('/Users/frankrojas/GDrive/Family/Assets/LLC-WBGroup/llcProfile_WBGroupLLC.json').expanduser()
 cfg = json.loads(p.read_text())
 clean = {k: cfg[k] for k in ('entity', 'F1065') if k in cfg}
 p.write_text(json.dumps(clean, indent=2))
 print('Removed:', [k for k in cfg if k not in clean])
 "
+
+
 git add books/Accts/llcProfile_WBGroupLLC.json
 git commit -m "refactor(profile): entity/F1065 only"
 git push
