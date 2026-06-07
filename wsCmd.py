@@ -152,6 +152,7 @@ class WsCmd:
                 print(f"  ✓ Deleted {_ADMIN_DB.name}")
             else:
                 print(f"  Keeping {_ADMIN_DB.name} — setup will continue.")
+                print(f"  Tip: to preserve pw.json.gpg, run setup WITHOUT --reset.")
 
     def _prompt_passphrase(self) -> str:
         print("\n── Step 1: Master GPG Passphrase ───────────────────────────────")
