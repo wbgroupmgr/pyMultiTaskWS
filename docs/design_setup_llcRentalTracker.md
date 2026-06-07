@@ -1,6 +1,6 @@
 # llcRentalTracker — Configuration & Setup Guide
 
-> Overall concepts and action plan: [design_setup.md](design_setup.md)
+> Overall concepts and action plan: [design_configuration.md](design_configuration.md)
 > Platform architecture: [design_pyMultiTaskWS.md](design_pyMultiTaskWS.md)
 
 ---
@@ -25,30 +25,39 @@ It involves two repos:
 
 ### 2.1 `~/.llcRentalTracker/config.json` — sole runtime authority
 
+`APP_SECRET_KEY` is **per-tracker** (one Flask signing key for the whole app).
+`APP_GPG_PASSPHRASE` is **per-BUS** — each BUS encrypts its own `pw.json.gpg` independently.
+
 ```json
 {
   "default": ["WBGroupLLC", 2025],
+  "APP_SECRET_KEY": "<one Flask signing key for this llcRentalTracker instance>",
   "llcList": [
     {
-      "llcName":   "WBGroupLLC",
-      "dataName":  "WBGroupLLC",
-      "bus_repo":  "<absolute path to LLC-WBGroup>",
-      "books_dir": "books",
-      "years":     [2025, 2026]
+      "llcName":            "WBGroupLLC",
+      "dataName":           "WBGroupLLC",
+      "bus_repo":           "<absolute path to LLC-WBGroup>",
+      "books_dir":          "books",
+      "years":              [2025, 2026],
+      "APP_GPG_PASSPHRASE": "<unique passphrase — sole key for WBGroupLLC pw.json.gpg>"
+    },
+    {
+      "llcName":            "<otherBUS>",
+      "dataName":           "<otherBUS>",
+      "bus_repo":           "<absolute path to otherBUS repo>",
+      "books_dir":          "books",
+      "years":              [2025],
+      "APP_GPG_PASSPHRASE": "<unique passphrase — different from WBGroupLLC>"
     }
-  ],
-  "secrets": {
-    "APP_GPG_PASSPHRASE": "<unique passphrase for this tracker>",
-    "APP_SECRET_KEY":     "<unique random hex key>"
-  }
+  ]
 }
 ```
 
 `chmod 600`. **Never in any repo.**
 
-`APP_GPG_PASSPHRASE` is the sole encryption key for `LLC-WBGroup/books/Accts/pw.json.gpg`.
-**Same value must be used on every host** — PA, local, any other host. It is the
-shared key for the BUS user database.
+`APP_GPG_PASSPHRASE` is the sole encryption key for that BUS's `pw.json.gpg`.
+**Same value must be used on every host** (PA, local) for the same BUS.
+Different BUS repos use different passphrases — a compromised BUS key exposes nothing else.
 
 ### 2.2 `LLC-WBGroup/books/Accts/pw.json.gpg` — user database
 
@@ -67,20 +76,26 @@ GPG-symmetric, encrypted with `APP_GPG_PASSPHRASE`. Lives in the BUS data repo.
 No filesystem paths, no passphrase, no year fields. These are migration artifacts —
 remove them if present.
 
-### 2.4 `~/.MultiTaskWS/config.json` — platform mirror (hosted mode only)
+### 2.4 `~/.MultiTaskWS/config.json` — platform routing entry (hosted mode only)
 
-When running under `pyMultiTaskWS`, the platform config holds a copy of the tracker's
-secrets for dispatcher injection. Written by `wsCmd.py --setup` when
-`~/.MultiTaskWS/config.json` is present:
+When running under `pyMultiTaskWS`, the tracker is registered in the platform `Trackers`
+list for dispatcher routing. `wsCmd.py --setup` writes this entry when
+`~/.MultiTaskWS/config.json` is present. **No secrets are stored here** — the tracker
+reads secrets exclusively from `~/.llcRentalTracker/config.json`.
 
 ```json
-"llcRentalTracker": {
-  "APP_GPG_PASSPHRASE": "<same value as ~/.llcRentalTracker/config.json>",
-  "APP_SECRET_KEY":     "<same value>"
+{
+  "name":       "LLC Rental Tracker",
+  "stanza_key": "llcRentalTracker",
+  "gitRemote":  "wbgroupmgr/llcRentalTracker",
+  "mount":      "/rentalTracker",
+  "url":        "/rentalTracker/login",
+  "description":"Financial Mgmt App for Property Rental LLC",
+  "status":     "online",
+  "builtin":    false,
+  "sys_path":   "<absolute path to llcRentalTracker clone>"
 }
 ```
-
-The stanza key is `llcRentalTracker` — matching the git repo name.
 
 ---
 
@@ -94,16 +109,24 @@ python3 wsCmd.py --newBus <path/to/LLC-WBGroup> --year 2025 --llcName WBGroupLLC
 ```
 
 What it does:
-- Prompts: `Enter APP_GPG_PASSPHRASE` (unique passphrase for this tracker)
-- Creates `~/.llcRentalTracker/config.json` (if absent) with `secrets: { APP_GPG_PASSPHRASE }`
-- Registers the BUS stanza in `llcList`
+- Prompts: `Enter APP_GPG_PASSPHRASE for WBGroupLLC` (unique per BUS — must match the passphrase that encrypted that BUS's `pw.json.gpg`)
+- Creates `~/.llcRentalTracker/config.json` (if absent)
+- Adds `{ llcName, bus_repo, years, APP_GPG_PASSPHRASE }` to `llcList`
 - Sets `default` to `WBGroupLLC/2025`
 
 To add a second year to an existing BUS:
 
 ```bash
 python3 wsCmd.py --newBus <path/to/LLC-WBGroup> --year 2026 --llcName WBGroupLLC
-# appends 2026 to years: list; passphrase already stored; no re-prompt
+# appends 2026 to years: list; APP_GPG_PASSPHRASE already in stanza; no re-prompt
+```
+
+To add a second BUS:
+
+```bash
+python3 wsCmd.py --newBus <path/to/otherBUS> --year 2025 --llcName otherBUS
+# prompts for otherBUS APP_GPG_PASSPHRASE (different from WBGroupLLC)
+# adds new stanza to llcList; default remains WBGroupLLC
 ```
 
 ### 3.2 `--setup` — Finalize secrets + create user DB
@@ -112,16 +135,19 @@ python3 wsCmd.py --newBus <path/to/LLC-WBGroup> --year 2026 --llcName WBGroupLLC
 python3 wsCmd.py --setup --llcName WBGroupLLC
 ```
 
-What it does:
-1. Reads `APP_GPG_PASSPHRASE` from `~/.llcRentalTracker/config.json secrets:` (set by `--newBus`)
-2. Generates `APP_SECRET_KEY` (random 64-char hex)
-3. Writes complete `secrets: { APP_GPG_PASSPHRASE, APP_SECRET_KEY }` to config
-4. If `~/.MultiTaskWS/config.json` exists: writes `llcRentalTracker:` stanza to platform config
-5. Creates `LLC-WBGroup/books/Accts/pw.json.gpg` encrypted with `APP_GPG_PASSPHRASE`
-6. Prints: `Push pw.json.gpg to BUS repo (PA = master host)`
+What it does (for `--llcName WBGroupLLC`):
+1. Reads `WBGroupLLC.APP_GPG_PASSPHRASE` from `llcList` stanza (set by `--newBus`)
+2. Generates `APP_SECRET_KEY` (random 64-char hex); writes to top-level config
+3. Creates `LLC-WBGroup/books/Accts/pw.json.gpg` encrypted with `WBGroupLLC.APP_GPG_PASSPHRASE`
+4. If `~/.MultiTaskWS/config.json` exists: writes routing entry to `Trackers` list (no secrets)
+5. Prints: `Push pw.json.gpg to BUS repo (PA = master host)`
 
-> **Note:** On local dev, `~/.MultiTaskWS/config.json` typically does not exist.
-> Step 4 is skipped silently — correct behavior for standalone mode.
+> **Note:** `APP_SECRET_KEY` is generated once for the tracker, not per BUS. If you run
+> `--setup` for a second BUS (`--llcName otherBUS`), the existing `APP_SECRET_KEY` is
+> reused — only `pw.json.gpg` is created for the new BUS using its own passphrase.
+>
+> On local dev, step 4 is skipped silently (no `~/.MultiTaskWS/config.json`) — correct
+> behavior for standalone mode.
 
 ### 3.3 `--start` — Start the app
 
@@ -131,9 +157,9 @@ python3 wsCmd.py --start --llcName WBGroupLLC --year 2025 [--port 5000] [--load]
 
 Startup injection (sole source — no fallback):
 ```
-~/.llcRentalTracker/config.json secrets:
-  APP_GPG_PASSPHRASE → os.environ["LLC_GPG_PASSPHRASE"]
-  APP_SECRET_KEY     → os.environ["LLC_SECRET_KEY"]
+~/.llcRentalTracker/config.json:
+  APP_SECRET_KEY              (top-level)      → os.environ["LLC_SECRET_KEY"]
+  llcList[WBGroupLLC].APP_GPG_PASSPHRASE       → os.environ["LLC_GPG_PASSPHRASE"]
 ```
 
 Hard fail if either key is absent — run `--setup` first.
@@ -279,29 +305,32 @@ All changes are in `llcRentalTracker`. These enable the TO-BE setup flow above.
 
 | Function | Change |
 |---|---|
-| `TRACKER_DICT` | `stanza_key` `"rentalTracker"` → `"llcRentalTracker"`; update `description` field |
-| `provision_new_bus()` | Remove `_ensure_master_passphrase()` + `_ensure_keys()`; prompt for `APP_GPG_PASSPHRASE` directly; write to `secrets:` via `_sp.write_secrets()` |
-| `_write_secrets_to_config()` | Rename dict keys `LLC_SECRET_KEY` → `APP_SECRET_KEY`, `LLC_GPG_PASSPHRASE` → `APP_GPG_PASSPHRASE` |
-| `setup()` | Remove `keys_file` / `_ensure_keys()` block; read `APP_GPG_PASSPHRASE` from `_sp.SECRETS`; call `_write_secrets_to_config()` to add `APP_SECRET_KEY` |
-| `addTracker()` | Use `stanza_key` (`"llcRentalTracker"`) to write secrets stanza to `~/.MultiTaskWS/config.json`; source values from `_sp.SECRETS` `APP_` keys |
-| `_inject_env_from_profile()` | Remove `MultiTaskWS_Config` fallback; read `APP_GPG_PASSPHRASE`/`APP_SECRET_KEY` only; `sys.exit()` with clear message if missing |
+| `TRACKER_DICT` | `stanza_key` `"rentalTracker"` → `"llcRentalTracker"`; update `description` field; mount `/rentalTracker` stays |
+| `provision_new_bus()` | Remove `_ensure_master_passphrase()` + `_ensure_keys()`; prompt for `APP_GPG_PASSPHRASE` per BUS; write to `llcList[i].APP_GPG_PASSPHRASE` in stanza |
+| `_write_secrets_to_config()` | Generate + write `APP_SECRET_KEY` at top level (once per tracker); rename `LLC_` → `APP_` keys |
+| `setup()` | Remove `keys_file` / `_ensure_keys()` block; read active BUS `APP_GPG_PASSPHRASE` from `_sp.SECRETS`; generate `APP_SECRET_KEY` if absent at top level |
+| `addTracker()` | Write routing-only entry to platform `Trackers` list; no secrets stanza for external tracker |
+| `_inject_env_from_profile()` | Remove `MultiTaskWS_Config` fallback; read `APP_SECRET_KEY` from top-level, `APP_GPG_PASSPHRASE` from active BUS stanza; `sys.exit()` with clear message if missing |
 
 ### 5.2 `wsgi.py` — replace `_inject_secrets()`
 
-Remove entire multi-tier function body. Replace with:
+Remove entire multi-tier function body. Replace with single-source reads:
+- `APP_SECRET_KEY` from top-level config (per-tracker)
+- `APP_GPG_PASSPHRASE` from the default BUS's `llcList` stanza (per-BUS)
 
 ```python
 def _inject_secrets() -> None:
-    # SOLE SOURCE: ~/.llcRentalTracker/config.json secrets:
-    # APP_GPG_PASSPHRASE → LLC_GPG_PASSPHRASE  (tracker's internal env var name)
-    # APP_SECRET_KEY     → LLC_SECRET_KEY
-    _s  = _sp.SECRETS
-    _pp = _s.get("APP_GPG_PASSPHRASE", "")
-    _sk = _s.get("APP_SECRET_KEY", "")
+    # SOLE SOURCE: ~/.llcRentalTracker/config.json
+    # APP_SECRET_KEY (top-level)        → LLC_SECRET_KEY env var
+    # llcList[default].APP_GPG_PASSPHRASE → LLC_GPG_PASSPHRASE env var
+    cfg = _sp.read_config()
+    _sk = cfg.get("APP_SECRET_KEY", "")
+    # _sp.SECRETS holds the active BUS stanza (populated by load_config)
+    _pp = _sp.SECRETS.get("APP_GPG_PASSPHRASE", "")
     if not _pp or not _sk:
         raise RuntimeError(
-            f"[wsgi] FATAL: APP_GPG_PASSPHRASE/APP_SECRET_KEY missing "
-            f"from {_sp.CONFIG_FILE} secrets:\n"
+            f"[wsgi] FATAL: APP_SECRET_KEY/APP_GPG_PASSPHRASE missing "
+            f"from {_sp.CONFIG_FILE}.\n"
             "  Run: python3 wsCmd.py --setup --llcName <name>"
         )
     os.environ.setdefault("LLC_GPG_PASSPHRASE", _pp)
@@ -310,9 +339,11 @@ def _inject_secrets() -> None:
 
 ### 5.3 `ledger/setup_paths.py`
 
-- Keep `SECRETS` global and `write_secrets()` — consumers use `APP_` key names
+- `SECRETS` global — populated from active BUS stanza (`llcList[i]`); holds `APP_GPG_PASSPHRASE`
+- `APP_SECRET_KEY` lives at top-level config, not in `SECRETS`; add `SECRET_KEY` module global or read directly from `read_config()`
 - Update `find_stanza()` to support nested `years:` schema (llcRentalTracker #19)
 - Remove `write_secrets()` call sites that write to `llcProfile_*.json`
+- `write_secrets()` now writes `APP_GPG_PASSPHRASE` into `llcList[i]` stanza; `APP_SECRET_KEY` written at top level separately
 
 ---
 
