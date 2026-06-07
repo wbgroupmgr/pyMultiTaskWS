@@ -315,7 +315,7 @@ LLC-WBGroup/books/Accts/pw.json.gpg   (in BUS repo, pushed — seed user)
 
 ```bash
 # PA Web tab → Reload
-# Visit https://<pa-domain>/rentalTracker/login   (mount path stays /rentalTracker)
+# Visit https://<pa-domain>/llcRentalTracker/login
 # Login: llcgroupmgr / llcManager0!  → change password immediately
 ```
 
@@ -326,7 +326,7 @@ python3 wsCmd.py --start --llcName WBGroupLLC --year 2025 --port 5000 --load
 # → reads APP_GPG_PASSPHRASE + APP_SECRET_KEY from ~/.llcRentalTracker/config.json secrets:
 #   (sole source — no tier fallback; fails immediately if either is missing)
 # → injects APP_GPG_PASSPHRASE + APP_SECRET_KEY into os.environ
-# → starts Flask at http://localhost:5000/rentalTracker   (mount path, not git name)
+# → starts Flask at http://localhost:5000/llcRentalTracker
 ```
 
 ---
@@ -514,12 +514,10 @@ LLC-WBGroup repo (BUS data):
 - Keep `write_secrets()` in `setup_paths.py` and `SECRETS` global — consumers updated to use `APP_` key names
 
 Code change details — `llcRentalTracker/wsCmd.py`:
-- `TRACKER_DICT`: change `stanza_key` from `"rentalTracker"` → `"llcRentalTracker"` (matches git repo name); update `description` field
-  - `mount` and `url` (`/rentalTracker`) stay unchanged — those are PA URL paths, not stanza keys
 - `provision_new_bus()`: replace `_ensure_master_passphrase()` + `_ensure_keys()` with direct `_prompt_passphrase_pair("APP_GPG_PASSPHRASE")`; write to `config.json secrets:` via `_sp.write_secrets()`
-- `_write_secrets_to_config()`: rename dict keys `LLC_SECRET_KEY` → `APP_SECRET_KEY`, `LLC_GPG_PASSPHRASE` → `APP_GPG_PASSPHRASE`; keep `WebServer` tag
+- `_write_secrets_to_config()`: rename dict keys `APP_SECRET_KEY` → `APP_SECRET_KEY`, `APP_GPG_PASSPHRASE` → `APP_GPG_PASSPHRASE`; keep `WebServer` tag
 - `setup()`: remove `keys_file` / `_ensure_keys()` block entirely; read `APP_GPG_PASSPHRASE` from `_sp.SECRETS` (written by `--newBus`); call `_write_secrets_to_config()` to add `APP_SECRET_KEY`
-- `addTracker()`: use `stanza_key` (now `"llcRentalTracker"`) to write secrets stanza to MultiTaskWS config; source values from `_sp.SECRETS` `APP_` keys
+- `addTracker()`: write `llcRentalTracker` stanza to MultiTaskWS config using tracker env var names sourced from `_sp.SECRETS` `APP_` values
 
 **2c — Remove `keys.json.gpg`** (`llcRentalTracker` + `LLC-WBGroup`)
 - Remove `keys.json.gpg` from BUS repo (`LLC-WBGroup/books/Accts/`)
@@ -546,8 +544,8 @@ Replace multi-tier fallback with single-source injection. `~/.llcRentalTracker/c
 the sole authority. Hard `RuntimeError` if either key is missing — no silent fallback, no setdefault on empty string:
 ```python
 # SOLE SOURCE: ~/.llcRentalTracker/config.json secrets:
-# config key APP_GPG_PASSPHRASE → env var LLC_GPG_PASSPHRASE (tracker's internal env var name)
-# config key APP_SECRET_KEY     → env var LLC_SECRET_KEY
+# APP_GPG_PASSPHRASE → APP_GPG_PASSPHRASE env var (tracker's internal env var name)
+# APP_SECRET_KEY     → APP_SECRET_KEY env var
 _s  = _sp.SECRETS
 _pp = _s.get("APP_GPG_PASSPHRASE", "")
 _sk = _s.get("APP_SECRET_KEY", "")
@@ -556,8 +554,8 @@ if not _pp or not _sk:
         f"[wsgi] FATAL: APP_GPG_PASSPHRASE/APP_SECRET_KEY missing from {_sp.CONFIG_FILE} secrets:\n"
         "  Run: python3 wsCmd.py --setup --llcName <name>"
     )
-os.environ.setdefault("LLC_GPG_PASSPHRASE", _pp)
-os.environ.setdefault("LLC_SECRET_KEY", _sk)
+os.environ.setdefault("APP_GPG_PASSPHRASE", _pp)
+os.environ.setdefault("APP_SECRET_KEY", _sk)
 ```
 
 Code change details — `llcRentalTracker/wsgi.py`:
@@ -571,7 +569,7 @@ Same single-source pattern as `wsgi.py` — no platform-vs-standalone distinctio
 
 Code change details — `llcRentalTracker/wsCmd.py` `_inject_env_from_profile()`:
 - Replace `cfg = _sp.SECRETS or {}` → `cfg = _sp.SECRETS`
-- Replace `LLC_GPG_PASSPHRASE` key reads → `APP_GPG_PASSPHRASE`; `LLC_SECRET_KEY` → `APP_SECRET_KEY`
+- Replace `APP_GPG_PASSPHRASE` key reads → `APP_GPG_PASSPHRASE`; `APP_SECRET_KEY` → `APP_SECRET_KEY`
 - Remove `MultiTaskWS_Config` fallback block entirely
 - `sys.exit()` with explicit error message if `APP_GPG_PASSPHRASE` or `APP_SECRET_KEY` is missing
 
@@ -596,8 +594,8 @@ Divided into two gates: **Now** (manual edits, no code changes needed) and
 
 | Value | Source (current) | Notes |
 |---|---|---|
-| `LLC_GPG_PASSPHRASE` | PA `llcProfile MultiTaskWS_Config.LLC_GPG_PASSPHRASE` | **PA value is canonical** — local has a typo (extra space) |
-| `LLC_SECRET_KEY` | PA `llcProfile MultiTaskWS_Config.LLC_SECRET_KEY` | Used for Flask sessions |
+| `APP_GPG_PASSPHRASE` | PA `llcProfile MultiTaskWS_Config.APP_GPG_PASSPHRASE` | **PA value is canonical** — local has a typo (extra space) |
+| `APP_SECRET_KEY` | PA `llcProfile MultiTaskWS_Config.APP_SECRET_KEY` | Used for Flask sessions |
 | `adminTracker.APP_GPG_PASSPHRASE` | PA `~/.MultiTaskWS/MultiTaskWS_config.json` | Do not change |
 | `adminTracker.WEB_SECRET_KEY` | PA `~/.MultiTaskWS/MultiTaskWS_config.json` | Do not change |
 | `WEB_SECRET_KEY` (platform) | PA `~/.MultiTaskWS/MultiTaskWS_config.json` | Do not change |
@@ -611,13 +609,13 @@ from pathlib import Path
 p = Path('/home/wbgroup/llc/LLC-WBGroup/books/Accts/llcProfile_WBGroupLLC.json')
 cfg = json.loads(p.read_text())
 mw = cfg.get('MultiTaskWS_Config', {})
-print('LLC_GPG_PASSPHRASE:', mw.get('LLC_GPG_PASSPHRASE'))
-print('LLC_SECRET_KEY    :', mw.get('LLC_SECRET_KEY'))
+print('APP_GPG_PASSPHRASE:', mw.get('APP_GPG_PASSPHRASE'))
+print('APP_SECRET_KEY    :', mw.get('APP_SECRET_KEY'))
 "
 ```
 
 **Known inconsistency — fix during migration:**
-Local `~/.llcRentalTracker/config.json` secrets has `"LLC_GPG_PASSPHRASE": "mylord,myredeemer, myrock"` (extra space). PA profile has `"mylord,myredeemer,myrock"` (no space). PA value is authoritative — local must be corrected to match.
+Local `~/.llcRentalTracker/config.json` secrets has `"APP_GPG_PASSPHRASE": "mylord,myredeemer, myrock"` (extra space). PA profile has `"mylord,myredeemer,myrock"` (no space). PA value is authoritative — local must be corrected to match.
 
 ---
 
@@ -637,10 +635,6 @@ Edit `~/.MultiTaskWS/MultiTaskWS_config.json` — add the stanza (using PA canon
   "APP_SECRET_KEY":     "<value from Step 0 above>"
 }
 ```
-
-> **Gate 1 note:** Current code (`@a47da23` Tier 3) reads `rentalTracker` stanza (old slug name).
-> The `llcRentalTracker` stanza written here is **Phase 2 prep** — current code won't use it yet.
-> The actual Gate 1 unblock is **Step 2** (fixing the `secrets:` block that Tier 2 reads).
 
 ```bash
 # Verify stanza written correctly
@@ -668,19 +662,18 @@ Replace the entire file:
     }
   ],
   "secrets": {
-    "LLC_GPG_PASSPHRASE": "<PA canonical value>",
-    "LLC_SECRET_KEY":     "<PA canonical value>"
+    "APP_GPG_PASSPHRASE": "<PA canonical value>",
+    "APP_SECRET_KEY":     "<PA canonical value>"
   }
 }
 ```
 
 Changes: removes duplicate stanza, fixes `llcName`, removes `master_passphrase`,
-adds `secrets:` block with `LLC_` key names (current code Tier 2 reads these), adopts nested `years:` schema (`llcRentalTracker #19`).
+adds `secrets:` block, adopts nested `years:` schema (`llcRentalTracker #19`).
 
-**Note — key name migration:** Gate 1 writes `LLC_GPG_PASSPHRASE`/`LLC_SECRET_KEY` because the
-current code (`@a47da23` Tier 2 in `wsgi.py`) reads those names from `SECRETS`.
-Gate 2 Step 8 (`wsCmd.py --setup` with Phase 2 code) rewrites the `secrets:` block to
-`APP_GPG_PASSPHRASE`/`APP_SECRET_KEY` automatically.
+**Note — key name migration:** Gate 1 writes `APP_GPG_PASSPHRASE`/`APP_SECRET_KEY` because the
+current code (`@a47da23`) reads those names. Gate 2 Step 8 (`wsCmd.py --setup` with Phase 2 code)
+will rewrite the `secrets:` block to `APP_GPG_PASSPHRASE`/`APP_SECRET_KEY` automatically.
 
 **PA: Step 3 — Clean `llcProfile_WBGroupLLC.json`** (PA = master, push from PA)
 
@@ -722,7 +715,7 @@ fi
 
 ```bash
 # PA dashboard → Web tab → Reload
-# Then visit https://<pa-domain>/rentalTracker/login   (mount path stays /rentalTracker)
+# Then visit https://<pa-domain>/llcRentalTracker/login
 # App should start; APP_GPG_PASSPHRASE loaded from ~/.llcRentalTracker/config.json secrets:
 ```
 
@@ -760,21 +753,22 @@ Replace the `llcList` entry and fix the passphrase typo (remove the extra space)
     }
   ],
   "secrets": {
-    "LLC_GPG_PASSPHRASE": "<PA canonical value — no trailing space>",
-    "LLC_SECRET_KEY":     "<generated locally by --setup>"
+    "APP_GPG_PASSPHRASE": "<PA canonical value — no trailing space>",
+    "APP_SECRET_KEY":     "<generated locally by --setup>"
   }
 }
 ```
 
-**Note — key name migration:** Gate 1 uses `LLC_` key names (current Tier 2 reads these).
+**Note — key name migration:** Same as PA: Gate 1 uses current `LLC_` names (current code compatibility).
 Gate 2 Step 8 (`wsCmd.py --setup` with Phase 2 code) rewrites to `APP_GPG_PASSPHRASE`/`APP_SECRET_KEY`.
+```
 
 **Local: Step 3 — Verify standalone start**
 
 ```bash
 cd /path/to/llcRentalTracker
 python3 wsCmd.py --start --llcName WBGroupLLC --year 2025 --port 5000 --load
-# Reads LLC_GPG_PASSPHRASE + LLC_SECRET_KEY from ~/.llcRentalTracker/config.json secrets: (current code key names)
+# Reads APP_GPG_PASSPHRASE + APP_SECRET_KEY from ~/.llcRentalTracker/config.json secrets: (sole source, current code names)
 ```
 
 ---
@@ -850,7 +844,7 @@ print('master_pp      :', 'PRESENT — REMOVE' if 'master_passphrase' in cfg els
 s = cfg.get('secrets', {})
 print('APP_GPG_PP     :', 'SET' if s.get('APP_GPG_PASSPHRASE') else 'MISSING')
 print('APP_SECRET_KEY :', 'SET' if s.get('APP_SECRET_KEY') else 'MISSING')
-print('LLC_ keys      :', 'STALE — run --setup to migrate' if s.get('LLC_GPG_PASSPHRASE') else 'absent ✓')
+print('LLC_ keys      :', 'STALE — run --setup to migrate' if s.get('APP_GPG_PASSPHRASE') else 'absent ✓')
 stanza = cfg['llcList'][0]
 print('llcName        :', stanza.get('llcName'))          # WBGroupLLC
 print('years          :', stanza.get('years'))            # [2025]
@@ -884,7 +878,7 @@ gpg --batch --decrypt --passphrase "$LLC_PP" \
 | `pyMultiTaskWS` codebase | Rename `MultiTaskWS_config.json` → `config.json` (file only; `~/.MultiTaskWS/` directory unchanged) |
 | `pyMultiTaskWS/docs/design_trackerApp.md` | Update §3.5 per-BUS deployment clause |
 | `llcRentalTracker/wsgi.py` | Replace three-tier `_inject_secrets()` with single-source `APP_` → `LLC_` env var injection; hard `RuntimeError` if missing |
-| `llcRentalTracker/wsCmd.py` | `TRACKER_DICT.stanza_key` `"rentalTracker"` → `"llcRentalTracker"`; `provision_new_bus`: prompt `APP_GPG_PASSPHRASE`, remove keys.json.gpg; `setup`: read `APP_`, generate `APP_SECRET_KEY`; `addTracker`: write `llcRentalTracker` stanza using `stanza_key`; `_inject_env_from_profile`: remove fallback chain, read `APP_` keys, hard fail |
+| `llcRentalTracker/wsCmd.py` | `provision_new_bus`: prompt `APP_GPG_PASSPHRASE`, remove keys.json.gpg; `setup`: read `APP_`, generate `APP_SECRET_KEY`; `addTracker`: write tracker env var names to platform stanza; `_inject_env_from_profile`: remove fallback chain, read `APP_` keys, hard fail |
 | `llcRentalTracker/ledger/setup_paths.py` | Keep `SECRETS` global + `write_secrets()`; update nested schema in `find_stanza()` (llcRentalTracker #19) |
 | `llcRentalTracker/docs/design_LLC_01.3-login_auth.md` | Rewrite startup sequence; remove keys.json.gpg / master_passphrase; update config schema to `APP_GPG_PASSPHRASE` / `APP_SECRET_KEY` (Design 3) |
 | `LLC-WBGroup/books/Accts/` | Remove `keys.json.gpg` only — `pw.json.gpg` stays |
