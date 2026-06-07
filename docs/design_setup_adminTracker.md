@@ -180,17 +180,18 @@ python3 wsCmd.py --setup --llcName WBGroupLLC
 # (does NOT re-prompt for passphrase — already in tracker config)
 ```
 
-**Manually verify the platform config now has both stanzas:**
+**Manually verify the platform config:**
 
 ```bash
 python3 -c "
 import json; from pathlib import Path
 cfg = json.loads((Path.home()/'.MultiTaskWS/config.json').read_text())
-for key in ('adminTracker', 'llcRentalTracker'):
-    s = cfg.get(key, {})
-    print(f'{key}: GPG={'SET' if s.get('APP_GPG_PASSPHRASE') else 'MISSING'}, KEY={'SET' if s.get('APP_SECRET_KEY') else 'MISSING'}')
+s = cfg.get('adminTracker', {})
+print('adminTracker GPG:', 'SET' if s.get('APP_GPG_PASSPHRASE') else 'MISSING')
+print('adminTracker KEY:', 'SET' if s.get('WEB_SECRET_KEY') else 'MISSING')
 print('Trackers:', [t.get('name') for t in cfg.get('Trackers', [])])
 "
+# Note: llcRentalTracker has no stanza here — external trackers read their own config.
 ```
 
 ### Step 5 — PA WSGI file (PA only — one-time)
@@ -228,12 +229,11 @@ import json; from pathlib import Path
 cfg = json.loads((Path.home()/'.MultiTaskWS/config.json').read_text())
 print('WEB_GPG_PASSPHRASE:', 'SET' if cfg.get('WEB_GPG_PASSPHRASE') else 'MISSING')
 print('WEB_SECRET_KEY    :', 'SET' if cfg.get('WEB_SECRET_KEY') else 'MISSING')
-for key in ('adminTracker', 'llcRentalTracker'):
-    s = cfg.get(key, {})
-    pp = 'SET' if s.get('APP_GPG_PASSPHRASE') else 'MISSING'
-    sk = 'SET' if s.get('APP_SECRET_KEY') else 'MISSING'
-    print(f'{key}: GPG={pp} KEY={sk}')
+s = cfg.get('adminTracker', {})
+print('adminTracker GPG  :', 'SET' if s.get('APP_GPG_PASSPHRASE') else 'MISSING')
+print('adminTracker KEY  :', 'SET' if s.get('WEB_SECRET_KEY') else 'MISSING')
 print('Trackers:', [t.get('stanza_key') for t in cfg.get('Trackers', [])])
+# llcRentalTracker has no stanza here — external tracker reads its own config
 "
 
 # 2. adminTracker config present
